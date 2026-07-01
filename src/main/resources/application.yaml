@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: SmartLightingExp
+
+  datasource:
+    url: jdbc:mysql://rm-bp1vhdjtj6xp496p09o.mysql.rds.aliyuncs.com:3306/smart_lighting?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: app_user
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
