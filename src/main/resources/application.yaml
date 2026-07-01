@@ -11,3 +11,20 @@ spring:
       maximum-pool-size: 10
       minimum-idle: 5
       connection-timeout: 30000
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: 86400000
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.experiment.smartlightingexp.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: enabled
+      logic-delete-value: 0
+      logic-not-delete-value: 1
