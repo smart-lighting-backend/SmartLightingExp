@@ -1,0 +1,103 @@
+package com.experiment.smartlightingexp.config;
+
+import com.experiment.smartlightingexp.common.SecurityContext;
+import com.experiment.smartlightingexp.util.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.ModelAndView;
+
+import java.util.List;
+
+/**
+ * JWT 拦截器 — 校验请求头中的 Token，解析用户信息并注入 SecurityContext。
+ * 白名单路径（无需登录）：
+ *   - /api/auth/login
+ *   - /doc.html, /v3/api-docs, /swagger-resources, /webjars
+ *   - /error
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class JwtInterceptor implements HandlerInterceptor {
+
+    private final JwtUtil jwtUtil;
+
+    /**
+     * 白名单路径前缀 — 匹配开头即放行。
+     */
+    private static final List<String> WHITE_LIST = List.of(
+            "/api/auth/login",
+            "/doc.html",
+            "/v3/api-docs",
+            "/swagger-resources",
+            "/webjars",
+            "/error",
+            "/favicon.ico"
+    );
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        String path = request.getRequestURI();
+
+        // 1. 白名单放行
+        if (isWhiteListed(path)) {
+            return true;
+        }
+
+        // 2. 从 Header 获取 Token
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            log.warn("[JWT拦截] 缺少Token或格式错误: {}", path);
+            response.setStatus(401);
+            response.setContentType("application/json;charset=utf-8");
+            response.getWriter().write("{\"code\":401,\"msg\":\"未登录，请先登录\",\"data\":null}");
+            return false;
+        }
+
+        String token = authHeader.substring(7);
+
+        // 3. 校验 Token
+        if (!jwtUtil.isTokenValid(token)) {
+            log.warn("[JWT拦截] Token无效或已过期: {}", path);
+            response.setStatus(401);
+            response.setContentType("application/json;charset=utf-8");
+            response.getWriter().write("{\"code\":401,\"msg\":\"Token已过期或无效，请重新登录\",\"data\":null}");
+            return false;
+        }
+
+        // 4. 解析用户信息并注入 SecurityContext
+        String username = jwtUtil.extractSubject(token);
+        String roleCode = jwtUtil.extractRoleCode(token);
+        List<String> permissions = jwtUtil.extractPermissions(token);
+
+        SecurityContext.setCurrentUser(
+                new SecurityContext.UserInfo(username, roleCode, permissions));
+
+        log.debug("[JWT拦截] 用户已认证: username={}, role={}", username, roleCode);
+        return true;
+    }
+
+    @Override
+    public void postHandle(HttpServletRequest request, HttpServletResponse response,
+                           Object handler, ModelAndView modelAndView) {
+        // 无需处理
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
+                                Object handler, Exception ex) {
+        // 请求结束后必须清除 ThreadLocal，防止内存泄漏
+        SecurityContext.clear();
+    }
+
+    /**
+     * 判断路径是否在白名单中。
+     */
+    private boolean isWhiteListed(String path) {
+        return WHITE_LIST.stream().anyMatch(path::startsWith);
+    }
+}

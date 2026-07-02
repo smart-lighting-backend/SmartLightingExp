@@ -1,6 +1,7 @@
 package com.experiment.smartlightingexp.controller;
 
 import com.experiment.smartlightingexp.common.Result;
+import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.ControlRequest;
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
@@ -18,6 +19,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 手动控制控制器 — 开灯、关灯、调光。
+ * 记录操作人（从 SecurityContext 获取），满足 IR-11 审计追溯要求。
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/devices")
@@ -51,6 +56,12 @@ public class ControlController {
             return Result.error("DIMMING 指令需提供 brightness 参数");
         }
 
+        // 从 SecurityContext 获取当前操作人
+        String operator = SecurityContext.getCurrentUsername();
+        if (operator == null) {
+            operator = "UNKNOWN";
+        }
+
         // 1. 组装指令标识（如 ON / OFF / DIMMING(70)）
         String cmdStr = "DIMMING".equals(request.getAction())
                 ? "DIMMING(" + request.getBrightness() + ")"
@@ -61,6 +72,7 @@ public class ControlController {
         cmdPayload.put("action", cmdStr);
         cmdPayload.put("issuedAt", LocalDateTime.now().toString());
         cmdPayload.put("source", "MANUAL");
+        cmdPayload.put("operator", operator);
         try {
             mqttPublisher.publish(
                     "streetlight/" + deviceId + "/command",
@@ -71,12 +83,13 @@ public class ControlController {
             return Result.error("MQTT 下发失败");
         }
 
-        // 3. 记录 control_command 流水
+        // 3. 记录 control_command 流水（含 operator 字段 → 满足 IR-11 审计追溯）
         ControlCommand cmd = new ControlCommand();
         cmd.setDeviceId(deviceId);
         cmd.setAction(cmdStr);
         cmd.setBrightness("DIMMING".equals(request.getAction()) ? request.getBrightness() : null);
         cmd.setSource("MANUAL");
+        cmd.setOperator(operator);
         cmd.setStatus("SENT");
         cmd.setIssuedAt(LocalDateTime.now());
         cmd.setResultDetail("手动控制-" + cmdStr);
@@ -87,7 +100,7 @@ public class ControlController {
                 new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
                         .eq(Device::getDeviceId, deviceId)
                         .set(Device::getLastManualAt, LocalDateTime.now()));
-        log.info("[{}] Manual control → {} (lastManualAt=now)", deviceId, cmdStr);
+        log.info("[{}] Manual control by {} → {} (lastManualAt=now)", deviceId, operator, cmdStr);
 
         return Result.success();
     }
