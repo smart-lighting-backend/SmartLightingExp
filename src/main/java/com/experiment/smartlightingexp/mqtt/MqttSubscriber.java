@@ -1,6 +1,6 @@
 package com.experiment.smartlightingexp.mqtt;
 
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
@@ -41,7 +41,7 @@ public class MqttSubscriber {
                     telemetryMapper.insert(telemetry);
                     String deviceId = topic.split("/")[1];
                     deviceMapper.update(null,
-                            LambdaUpdateWrapper.<Device>update()
+                            Wrappers.<Device>lambdaUpdate()
                                     .eq(Device::getDeviceId, deviceId)
                                     .set(Device::getLatestData, json));
                     log.info("  [{}] ← MQTT received → DB inserted (id={})",
