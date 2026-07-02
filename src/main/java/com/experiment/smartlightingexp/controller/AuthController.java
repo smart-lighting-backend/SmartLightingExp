@@ -6,6 +6,7 @@ import com.experiment.smartlightingexp.dto.LoginResponse;
 import com.experiment.smartlightingexp.entity.Role;
 import com.experiment.smartlightingexp.entity.User;
 import com.experiment.smartlightingexp.mapper.RoleMapper;
+import com.experiment.smartlightingexp.mapper.UserMapper;
 import com.experiment.smartlightingexp.service.AuditLogService;
 import com.experiment.smartlightingexp.service.PermissionService;
 import com.experiment.smartlightingexp.service.UserService;
@@ -14,6 +15,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -29,10 +31,12 @@ import java.util.List;
 public class AuthController {
 
     private final UserService userService;
+    private final UserMapper userMapper;
     private final RoleMapper roleMapper;
     private final PermissionService permissionService;
     private final AuditLogService auditLogService;
     private final JwtUtil jwtUtil;
+    private final PasswordEncoder passwordEncoder;
 
     /**
      * 用户登录 — 校验用户名密码，签发 JWT。
@@ -52,8 +56,8 @@ public class AuthController {
             return Result.error(401, "用户名或密码错误");
         }
 
-        // 2. 校验密码（简易比较，生产环境应使用 BCryptPasswordEncoder）
-        if (!user.getPassword().equals(request.getPassword())) {
+        // 2. 校验密码（BCrypt 加密比对）
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             log.warn("[登录失败] 密码错误: {}", request.getUsername());
             auditLog(request.getUsername(), "LOGIN", "SYSTEM", null,
                     "登录失败-密码错误", "FAIL", getClientIp(httpRequest));
@@ -75,9 +79,15 @@ public class AuthController {
         log.info("[登录成功] username={}, role={}, permissions={}",
                 user.getUsername(), role.getRoleCode(), permissions.size());
 
-        // 5. 审计日志
+        // 5. 更新最后登录信息
+        String clientIp = getClientIp(httpRequest);
+        user.setLastLoginIp(clientIp);
+        user.setLastLoginTime(LocalDateTime.now());
+        userMapper.updateById(user);
+
+        // 6. 审计日志
         auditLog(user.getUsername(), "LOGIN", "SYSTEM", null,
-                "登录成功-角色:" + role.getRoleCode(), "SUCCESS", getClientIp(httpRequest));
+                "登录成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
         return Result.success(new LoginResponse(token, user.getUsername(), role.getRoleCode()));
     }

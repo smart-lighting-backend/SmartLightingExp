@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 /**
  * 用户实体 — 登录鉴权和操作审计追溯。
  * roleId 关联 role 表，支持 RBAC 权限模型。
@@ -22,11 +24,26 @@ public class User {
 
     private String realName;
 
+    private String phone;
+
+    private String email;
+
+    private String department;
+
+    /** 管辖区域编码（如 CQ-01），用于数据权限隔离 */
+    private String areaCode;
+
     private Long roleId;
 
     private Boolean enabled;
 
-    private java.time.LocalDateTime createTime;
+    /** 最后登录 IP 地址 */
+    private String lastLoginIp;
 
-    private java.time.LocalDateTime updateTime;
+    /** 最后登录时间 */
+    private LocalDateTime lastLoginTime;
+
+    private LocalDateTime createTime;
+
+    private LocalDateTime updateTime;
 }
