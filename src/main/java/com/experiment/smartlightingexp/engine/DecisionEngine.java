@@ -1,4 +1,4 @@
-package com.experiment.smartlightingexp.service;
+package com.experiment.smartlightingexp.engine;
 
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.DecisionLog;

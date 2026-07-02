@@ -5,7 +5,7 @@ import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.TelemetryMapper;
-import com.experiment.smartlightingexp.service.DecisionEngine;
+import com.experiment.smartlightingexp.engine.DecisionEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
