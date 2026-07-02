@@ -5,6 +5,7 @@ import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.TelemetryMapper;
+import com.experiment.smartlightingexp.service.DecisionEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ public class MqttSubscriber {
     private final TelemetryMapper telemetryMapper;
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
+    private final DecisionEngine decisionEngine;
 
     @PostConstruct
     public void init() {
@@ -46,6 +48,9 @@ public class MqttSubscriber {
                                     .set(Device::getLatestData, json));
                     log.info("  [{}] ← MQTT received → DB inserted (id={})",
                             deviceId, telemetry.getId());
+
+                    // 触发 AI 策略引擎评估
+                    decisionEngine.evaluate(deviceId, telemetry);
                 } catch (Exception e) {
                     log.error("  [{}] ✗ process failed: {}", topic, e.getMessage());
                 }

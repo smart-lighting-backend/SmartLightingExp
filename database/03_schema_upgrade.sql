@@ -4,12 +4,17 @@
 -- ============================================================
 
 -- ============================================================
--- 1. device — 新增 latest_data 字段
---    用于前端实时展示设备最新遥测，避免频繁查询 telemetry 流水表
+-- 1. device — 新增 latest_data + last_manual_at 字段
+--    latest_data: 用于前端实时展示设备最新遥测，避免频繁查询 telemetry 流水表
+--    last_manual_at: 记录最后一次手动操作时间，策略引擎在此后 30 分钟内跳过自动控制
 -- ============================================================
 ALTER TABLE device
     ADD COLUMN latest_data JSON DEFAULT NULL COMMENT '最新遥测快照（冗余字段，前端展示用）'
     AFTER last_heartbeat_at;
+
+ALTER TABLE device
+    ADD COLUMN last_manual_at DATETIME(3) DEFAULT NULL COMMENT '最后手动操作时间（策略引擎根据此字段避免人机拉锯）'
+    AFTER latest_data;
 
 
 -- ============================================================

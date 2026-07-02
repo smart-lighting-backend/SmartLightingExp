@@ -23,7 +23,7 @@ mqtt:
   broker: tcp://47.96.27.141:1883
   username: backend
   password: 123456
-  client-id: smart-lighting-backend
+  client-id: smart-lighting-backend-v2
   topic-prefix: streetlight
 
 mybatis-plus:
