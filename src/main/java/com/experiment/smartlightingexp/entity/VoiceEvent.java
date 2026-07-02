@@ -7,41 +7,25 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("device")
-public class Device {
+@TableName("voice_event")
+public class VoiceEvent {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
     private String deviceId;
 
-    private String name;
+    private String type;
 
-    private String area;
+    private String content;
 
-    private String location;
+    private String source;
 
-    private Integer status;
-
-    private BigDecimal healthScore;
-
-    private String topicPrefix;
-
-    private LocalDateTime lastHeartbeatAt;
-
-    private String latestData;
-
-    private Boolean enabled;
-
-    private Boolean deleted;
+    private LocalDateTime occurredAt;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
-
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updateTime;
 }

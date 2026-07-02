@@ -8,40 +8,30 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("device")
-public class Device {
+@TableName("energy_record")
+public class EnergyRecord {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
     private String deviceId;
 
-    private String name;
+    private LocalDate recordDate;
 
-    private String area;
+    private Integer onDurationMin;
 
-    private String location;
+    private BigDecimal avgBrightness;
 
-    private Integer status;
+    private BigDecimal estimatedKwh;
 
-    private BigDecimal healthScore;
+    private BigDecimal savingRate;
 
-    private String topicPrefix;
-
-    private LocalDateTime lastHeartbeatAt;
-
-    private String latestData;
-
-    private Boolean enabled;
-
-    private Boolean deleted;
+    private BigDecimal carbonReduction;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
-
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updateTime;
 }

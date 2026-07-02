@@ -11,37 +11,22 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("device")
-public class Device {
+@TableName("vision_event")
+public class VisionEvent {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
     private String deviceId;
 
-    private String name;
+    private String eventType;
 
-    private String area;
+    private BigDecimal confidence;
 
-    private String location;
+    private String snapshotRef;
 
-    private Integer status;
-
-    private BigDecimal healthScore;
-
-    private String topicPrefix;
-
-    private LocalDateTime lastHeartbeatAt;
-
-    private String latestData;
-
-    private Boolean enabled;
-
-    private Boolean deleted;
+    private LocalDateTime occurredAt;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
-
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updateTime;
 }

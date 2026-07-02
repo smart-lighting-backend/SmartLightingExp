@@ -1,6 +1,9 @@
 package com.experiment.smartlightingexp.mqtt;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
+import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.TelemetryMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -20,6 +23,7 @@ public class MqttSubscriber {
     private final MqttClient mqttClient;
     private final TelemetryMapper telemetryMapper;
     private final ObjectMapper objectMapper;
+    private final DeviceMapper deviceMapper;
 
     @PostConstruct
     public void init() {
@@ -36,6 +40,10 @@ public class MqttSubscriber {
                     Telemetry telemetry = objectMapper.readValue(json, Telemetry.class);
                     telemetryMapper.insert(telemetry);
                     String deviceId = topic.split("/")[1];
+                    deviceMapper.update(null,
+                            LambdaUpdateWrapper.<Device>update()
+                                    .eq(Device::getDeviceId, deviceId)
+                                    .set(Device::getLatestData, json));
                     log.info("  [{}] ← MQTT received → DB inserted (id={})",
                             deviceId, telemetry.getId());
                 } catch (Exception e) {
