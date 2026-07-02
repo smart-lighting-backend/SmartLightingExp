@@ -28,6 +28,8 @@ public class LightingPolicy {
 
     private Boolean enabled;
 
+    private Boolean deleted;
+
     private String effectiveTime;
 
     @TableField(fill = FieldFill.INSERT)

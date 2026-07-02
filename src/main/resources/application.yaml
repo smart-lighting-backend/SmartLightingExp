@@ -3,7 +3,7 @@ spring:
     name: SmartLightingExp
 
   datasource:
-    url: jdbc:mysql://rm-bp1vhdjtj6xp496p09o.mysql.rds.aliyuncs.com:3306/smart_lighting?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://rm-bp1vhdjtj6xp496p09o.mysql.rds.aliyuncs.com:3306/smart_lighting_db?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: app_user
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -16,6 +16,16 @@ jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000
 
+mock:
+  enabled: true
+
+mqtt:
+  broker: tcp://47.96.27.141:1883
+  username: backend
+  password: 123456
+  client-id: smart-lighting-backend
+  topic-prefix: streetlight
+
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
   type-aliases-package: com.experiment.smartlightingexp.entity
@@ -25,6 +35,6 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
-      logic-delete-field: enabled
-      logic-delete-value: 0
-      logic-not-delete-value: 1
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
