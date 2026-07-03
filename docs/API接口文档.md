@@ -132,7 +132,93 @@ device.last_manual_at = now（AI 锁定 30 分钟，防覆盖）
 
 ---
 
-## 三、AI 自动控制（事件驱动，无 API 端点）
+## 三、维护智能体
+
+### 3.1 知识库问答 / 阈值控制
+
+同一个入口支持两类能力：
+
+- 维护问答：调用 MaxKB RAG 应用回答常见故障问题。
+- 阈值控制：识别“把阈值调到30”等意图，直接修改后端光照阈值策略。
+
+**请求**
+
+```
+POST /api/assistant/chat
+```
+
+**请求体**
+
+```json
+{
+  "message": "灯不亮怎么办"
+}
+```
+
+**问答响应**
+
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "type": "KNOWLEDGE_QA",
+    "content": "请先查看平台设备状态是否在线..."
+  }
+}
+```
+
+**阈值控制请求**
+
+```json
+{
+  "message": "把阈值调到30"
+}
+```
+
+**阈值控制响应**
+
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "type": "THRESHOLD_UPDATED",
+    "content": "已将光照触发阈值调整为 30 lux。",
+    "action": {
+      "name": "SET_LUX_LT_THRESHOLD",
+      "luxLt": 30,
+      "policyId": 1,
+      "policyName": "光照低于阈值自动开灯"
+    }
+  }
+}
+```
+
+### 3.2 光照阈值 API
+
+**查询**
+
+```
+GET /api/policies/lux-threshold
+```
+
+**修改**
+
+```
+PUT /api/policies/lux-threshold
+```
+
+```json
+{
+  "luxLt": 30,
+  "luxGt": 200
+}
+```
+
+---
+
+## 四、AI 自动控制（事件驱动，无 API 端点）
 
 ### 3.1 触发方式
 
@@ -201,7 +287,7 @@ DecisionEngine.evaluate(deviceId, telemetry)
 
 ---
 
-## 四、MQTT 主题
+## 五、MQTT 主题
 
 ### 4.1 上行（设备 → 云）
 
@@ -221,7 +307,7 @@ DecisionEngine.evaluate(deviceId, telemetry)
 
 ---
 
-## 五、数据库表结构
+## 六、数据库表结构
 
 ### 5.1 device — 设备台账
 
@@ -276,7 +362,7 @@ DecisionEngine.evaluate(deviceId, telemetry)
 
 ---
 
-## 六、错误码一览
+## 七、错误码一览
 
 | code | 说明 | 典型场景 |
 |:---:|------|---------|
