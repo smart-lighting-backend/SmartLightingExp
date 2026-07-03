@@ -19,6 +19,11 @@ jwt:
 mock:
   enabled: true
 
+heartbeat:
+  detection-interval-ms: 60000       # 离线检测定时任务周期（毫秒）
+  offline-threshold-seconds: 300     # 超过此秒数无遥测上报判定离线
+  startup-delay-ms: 120000           # 应用启动后延迟多久开始检测（毫秒）
+
 mqtt:
   broker: tcp://47.96.27.141:1883
   username: backend
