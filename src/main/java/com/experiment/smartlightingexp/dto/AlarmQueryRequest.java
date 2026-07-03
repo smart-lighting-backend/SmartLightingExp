@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -34,8 +35,10 @@ public class AlarmQueryRequest {
     // ======================== 分页参数 ========================
 
     /** 当前页码，默认 1 */
+    @JsonProperty("pageNum")
     private int page = 1;
 
     /** 每页条数，默认 20 */
+    @JsonProperty("pageSize")
     private int size = 20;
 }
