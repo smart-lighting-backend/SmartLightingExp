@@ -3,12 +3,15 @@ package com.experiment.smartlightingexp.controller;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.ControlRequest;
+import com.experiment.smartlightingexp.entity.AuditLog;
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mqtt.MqttPublisher;
+import com.experiment.smartlightingexp.service.AuditLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +36,7 @@ public class ControlController {
     private final ControlCommandMapper controlCommandMapper;
     private final MqttPublisher mqttPublisher;
     private final ObjectMapper objectMapper;
+    private final AuditLogService auditLogService;
 
     private static final List<String> VALID_ACTIONS = List.of("ON", "OFF", "DIMMING");
 
@@ -42,17 +46,21 @@ public class ControlController {
      */
     @PostMapping("/{deviceId}/control")
     public Result<Void> control(@PathVariable String deviceId,
-                                @Valid @RequestBody ControlRequest request) {
+                                @Valid @RequestBody ControlRequest request,
+                                HttpServletRequest httpRequest) {
         Device device = deviceMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Device>()
                         .eq(Device::getDeviceId, deviceId));
         if (device == null) {
+            saveAuditLog("CONTROL", "DEVICE", deviceId, "设备不存在-操作失败", "FAIL", httpRequest);
             return Result.error("设备不存在");
         }
         if (!VALID_ACTIONS.contains(request.getAction())) {
+            saveAuditLog("CONTROL", "DEVICE", deviceId, "无效指令-" + request.getAction(), "FAIL", httpRequest);
             return Result.error("无效指令类型，支持: ON/OFF/DIMMING");
         }
         if ("DIMMING".equals(request.getAction()) && request.getBrightness() == null) {
+            saveAuditLog("CONTROL", "DEVICE", deviceId, "DIMMING缺少brightness", "FAIL", httpRequest);
             return Result.error("DIMMING 指令需提供 brightness 参数");
         }
 
@@ -80,6 +88,7 @@ public class ControlController {
                     1);
         } catch (Exception e) {
             log.error("[{}] MQTT publish failed: {}", deviceId, e.getMessage());
+            saveAuditLog("CONTROL", "DEVICE", deviceId, "MQTT下发失败-" + e.getMessage(), "FAIL", httpRequest);
             return Result.error("MQTT 下发失败");
         }
 
@@ -100,8 +109,50 @@ public class ControlController {
                 new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
                         .eq(Device::getDeviceId, deviceId)
                         .set(Device::getLastManualAt, LocalDateTime.now()));
-        log.info("[{}] Manual control by {} → {} (lastManualAt=now)", deviceId, operator, cmdStr);
 
+        // 5. 审计日志
+        saveAuditLog("CONTROL", "DEVICE", deviceId, "手动控制-" + cmdStr, "SUCCESS", httpRequest);
+
+        log.info("[{}] Manual control by {} → {} (lastManualAt=now)", deviceId, operator, cmdStr);
         return Result.success();
+    }
+
+    /**
+     * 记录审计日志。
+     */
+    private void saveAuditLog(String action, String targetType, String targetId,
+                              String detail, String result, HttpServletRequest request) {
+        try {
+            AuditLog logEntry = new AuditLog();
+            String operator = SecurityContext.getCurrentUsername();
+            logEntry.setOperator(operator != null ? operator : "UNKNOWN");
+            logEntry.setAction(action);
+            logEntry.setTargetType(targetType);
+            logEntry.setTargetId(targetId);
+            logEntry.setDetail(detail);
+            logEntry.setResult(result);
+            logEntry.setIpAddress(getClientIp(request));
+            logEntry.setOperatedAt(LocalDateTime.now());
+            auditLogService.save(logEntry);
+        } catch (Exception e) {
+            log.error("审计日志记录失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 获取客户端 IP 地址。
+     */
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("X-Real-IP");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        }
+        if (ip != null && ip.contains(",")) {
+            ip = ip.split(",")[0].trim();
+        }
+        return ip;
     }
 }
