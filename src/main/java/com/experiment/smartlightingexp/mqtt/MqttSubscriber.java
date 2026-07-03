@@ -6,6 +6,7 @@ import com.experiment.smartlightingexp.entity.Telemetry;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.TelemetryMapper;
 import com.experiment.smartlightingexp.engine.DecisionEngine;
+import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,7 @@ import org.eclipse.paho.client.mqttv3.MqttCallback;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 @Slf4j
 @Component
@@ -26,6 +28,7 @@ public class MqttSubscriber {
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
     private final DecisionEngine decisionEngine;
+    private final AlarmRecordService alarmRecordService;
 
     @PostConstruct
     public void init() {
@@ -40,12 +43,16 @@ public class MqttSubscriber {
                 try {
                     String json = new String(message.getPayload());
                     Telemetry telemetry = objectMapper.readValue(json, Telemetry.class);
-                    telemetryMapper.insert(telemetry);
                     String deviceId = topic.split("/")[1];
+                    if (!StringUtils.hasText(telemetry.getDeviceId())) {
+                        telemetry.setDeviceId(deviceId);
+                    }
+                    telemetryMapper.insert(telemetry);
                     deviceMapper.update(null,
                             Wrappers.<Device>lambdaUpdate()
                                     .eq(Device::getDeviceId, deviceId)
                                     .set(Device::getLatestData, json));
+                    alarmRecordService.markDeviceOnline(deviceId, telemetry.getCollectedAt());
                     log.info("  [{}] ← MQTT received → DB inserted (id={})",
                             deviceId, telemetry.getId());
 

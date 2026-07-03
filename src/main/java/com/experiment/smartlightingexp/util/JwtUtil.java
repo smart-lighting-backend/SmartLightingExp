@@ -4,6 +4,7 @@ import com.experiment.smartlightingexp.config.JwtProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.io.DecodingException;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Component;
 
@@ -23,8 +24,27 @@ public class JwtUtil {
     private final long expiration;
 
     public JwtUtil(JwtProperties jwtProperties) {
-        this.secretKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtProperties.getSecret()));
+        this.secretKey = Keys.hmacShaKeyFor(decodeSecret(jwtProperties.getSecret()));
         this.expiration = jwtProperties.getExpiration();
+    }
+
+    private byte[] decodeSecret(String secret) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalArgumentException("JWT_SECRET 不能为空");
+        }
+
+        String trimmedSecret = secret.trim();
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(trimmedSecret);
+        } catch (DecodingException ignored) {
+            keyBytes = Decoders.BASE64URL.decode(trimmedSecret);
+        }
+
+        if (keyBytes.length < 32) {
+            throw new IllegalArgumentException("JWT_SECRET 解码后长度不能小于 32 字节，请使用至少 256 位的 Base64/Base64URL 密钥");
+        }
+        return keyBytes;
     }
 
     /**
