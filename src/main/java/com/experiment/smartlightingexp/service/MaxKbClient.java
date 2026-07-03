@@ -2,8 +2,10 @@ package com.experiment.smartlightingexp.service;
 
 import com.experiment.smartlightingexp.common.BusinessException;
 import com.experiment.smartlightingexp.config.MaxKbProperties;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.ParameterizedTypeReference;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -13,39 +15,52 @@ import org.springframework.web.client.RestClientException;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MaxKbClient {
 
     private final MaxKbProperties properties;
-    private final RestClient restClient = RestClient.create();
+    private final ObjectMapper objectMapper;
 
     public String chat(String question) {
         if (!properties.isConfigured()) {
             throw new BusinessException(500, "MaxKB 未配置，请设置 MAXKB_CHAT_COMPLETIONS_URL 和 MAXKB_API_KEY");
         }
 
-        Map<String, Object> request = Map.of(
-                "model", properties.getModel(),
-                "stream", false,
-                "messages", List.of(Map.of(
-                        "role", "user",
-                        "content", question
-                ))
-        );
-
         try {
-            Map<String, Object> response = restClient.post()
+            // 手动序列化 JSON，确保 UTF-8 编码正确
+            String requestJson = objectMapper.writeValueAsString(Map.of(
+                    "model", properties.getModel(),
+                    "stream", false,
+                    "messages", List.of(Map.of(
+                            "role", "user",
+                            "content", question
+                    ))
+            ));
+
+            String responseJson = RestClient.create()
+                    .post()
                     .uri(properties.getChatCompletionsUrl())
                     .contentType(MediaType.APPLICATION_JSON)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getApiKey())
-                    .body(request)
+                    .body(requestJson)
                     .retrieve()
-                    .body(new ParameterizedTypeReference<>() {
-                    });
+                    .body(String.class);
+
+            if (responseJson == null || responseJson.isBlank()) {
+                throw new BusinessException(502, "MaxKB 返回为空");
+            }
+
+            Map<String, Object> response = objectMapper.readValue(responseJson,
+                    new TypeReference<Map<String, Object>>() {});
             return extractContent(response);
         } catch (RestClientException e) {
+            log.error("MaxKB 请求失败: {}", e.getMessage());
             throw new BusinessException(502, "MaxKB 问答服务调用失败: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("MaxKB 处理异常", e);
+            throw new BusinessException(502, "MaxKB 服务异常: " + e.getMessage());
         }
     }
 
