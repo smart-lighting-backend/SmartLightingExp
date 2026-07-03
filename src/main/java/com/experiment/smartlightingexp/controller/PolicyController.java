@@ -4,11 +4,15 @@ import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.LuxThresholdRequest;
 import com.experiment.smartlightingexp.dto.LuxThresholdResponse;
+import com.experiment.smartlightingexp.dto.PolicyQueryRequest;
 import com.experiment.smartlightingexp.dto.PolicyRequest;
 import com.experiment.smartlightingexp.entity.AuditLog;
 import com.experiment.smartlightingexp.entity.LightingPolicy;
 import com.experiment.smartlightingexp.mapper.AuditLogMapper;
 import com.experiment.smartlightingexp.service.LightingPolicyService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,6 +56,47 @@ public class PolicyController {
                 .orderByAsc(LightingPolicy::getPriority)
                 .list();
         return Result.success(list);
+    }
+
+    /**
+     * 组合条件分页查询策略列表。
+     * 支持按名称模糊、策略类型、启用状态、优先级范围、生效时段筛选。
+     */
+    @PostMapping("/list")
+    public Result<IPage<LightingPolicy>> listPage(@RequestBody PolicyQueryRequest request) {
+        LambdaQueryWrapper<LightingPolicy> wrapper = new LambdaQueryWrapper<>();
+
+        // 默认只查未删除的策略
+        wrapper.eq(LightingPolicy::getDeleted, false);
+
+        if (request.getName() != null && !request.getName().isBlank()) {
+            wrapper.like(LightingPolicy::getName, request.getName());
+        }
+        if (request.getPolicyType() != null && !request.getPolicyType().isBlank()) {
+            wrapper.eq(LightingPolicy::getPolicyType, request.getPolicyType());
+        }
+        if (request.getEnabled() != null) {
+            wrapper.eq(LightingPolicy::getEnabled, request.getEnabled());
+        }
+        if (request.getPriorityMin() != null) {
+            wrapper.ge(LightingPolicy::getPriority, request.getPriorityMin());
+        }
+        if (request.getPriorityMax() != null) {
+            wrapper.le(LightingPolicy::getPriority, request.getPriorityMax());
+        }
+        if (request.getEffectiveTime() != null && !request.getEffectiveTime().isBlank()) {
+            wrapper.like(LightingPolicy::getEffectiveTime, request.getEffectiveTime());
+        }
+
+        wrapper.orderByAsc(LightingPolicy::getPriority);
+
+        Page<LightingPolicy> page = new Page<>(request.getPage(), request.getSize());
+        IPage<LightingPolicy> result = lightingPolicyService.page(page, wrapper);
+
+        log.info("[策略查询] 条件: name={}, policyType={}, enabled={}, 结果数={}",
+                request.getName(), request.getPolicyType(), request.getEnabled(),
+                result.getRecords().size());
+        return Result.success(result);
     }
 
     /**
