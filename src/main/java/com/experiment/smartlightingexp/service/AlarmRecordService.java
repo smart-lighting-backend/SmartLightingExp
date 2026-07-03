@@ -1,6 +1,8 @@
 package com.experiment.smartlightingexp.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.experiment.smartlightingexp.dto.AlarmPageRequest;
 import com.experiment.smartlightingexp.entity.AlarmRecord;
 
 /**
@@ -15,6 +17,12 @@ public interface AlarmRecordService extends IService<AlarmRecord> {
      * @return 告警记录，或 null
      */
     AlarmRecord findActiveOfflineAlarm(String deviceId);
+
+    Page<AlarmRecord> pageAlarms(AlarmPageRequest request);
+
+    AlarmRecord getAlarmDetail(Long id);
+
+    void scanOfflineDevices();
 
     /**
      * 恢复指定设备的 OFFLINE 告警（置为 RECOVERED）。
