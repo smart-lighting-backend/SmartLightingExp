@@ -17,7 +17,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     public User getByUsername(String username) {
         return lambdaQuery()
                 .eq(User::getUsername, username)
-                .eq(User::getDeleted, false)
+                // MyBatis-Plus 全局配置 logic-delete-field + logic-not-delete-value
+                // 会自动追加 WHERE deleted = 0，此处无需重复过滤
                 .one();
     }
 }

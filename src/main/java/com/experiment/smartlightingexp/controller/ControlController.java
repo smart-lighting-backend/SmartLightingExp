@@ -1,5 +1,7 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.ControlRequest;
@@ -115,6 +117,23 @@ public class ControlController {
 
         log.info("[{}] Manual control by {} → {} (lastManualAt=now)", deviceId, operator, cmdStr);
         return Result.success();
+    }
+
+    /**
+     * 查询设备控制历史（分页）。
+     * 复用 control_command 表，按下发时间倒序排列。
+     */
+    @GetMapping("/{deviceId}/control-history")
+    public Result<Page<ControlCommand>> controlHistory(
+            @PathVariable String deviceId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        Page<ControlCommand> p = controlCommandMapper.selectPage(
+                new Page<>(page, size),
+                Wrappers.<ControlCommand>lambdaQuery()
+                        .eq(ControlCommand::getDeviceId, deviceId)
+                        .orderByDesc(ControlCommand::getIssuedAt));
+        return Result.success(p);
     }
 
     /**
