@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -78,6 +79,55 @@ public class DeviceController {
     }
 
     /**
+     * 分页查询设备列表（GET 方式，URL 查询参数）。
+     * 支持关键词搜索（匹配 deviceId / name / location）+ 区域 / 状态 / 启用状态筛选。
+     */
+    @GetMapping("/page")
+    public Result<IPage<Device>> page(
+            @RequestParam(defaultValue = "1") long pageNum,
+            @RequestParam(defaultValue = "10") long pageSize,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String area,
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) Boolean enabled) {
+
+        // 参数校验
+        if (pageNum < 1) pageNum = 1;
+        if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
+
+        LambdaQueryWrapper<Device> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Device::getDeleted, false);
+
+        // 关键词模糊匹配 deviceId / name / location
+        if (keyword != null && !keyword.isBlank()) {
+            wrapper.and(w -> w
+                    .like(Device::getDeviceId, keyword)
+                    .or().like(Device::getName, keyword)
+                    .or().like(Device::getLocation, keyword));
+        }
+        if (area != null && !area.isBlank()) {
+            wrapper.eq(Device::getArea, area);
+        }
+        if (status != null) {
+            wrapper.eq(Device::getStatus, status);
+        }
+        if (enabled != null) {
+            wrapper.eq(Device::getEnabled, enabled);
+        }
+
+        // 排序：区域升序 → 设备编号升序
+        wrapper.orderByAsc(Device::getArea).orderByAsc(Device::getDeviceId);
+
+        Page<Device> page = new Page<>(pageNum, pageSize);
+        IPage<Device> result = deviceService.page(page, wrapper);
+
+        log.info("[设备分页] keyword={}, area={}, status={}, enabled={}, 结果数={}",
+                keyword, area, status, enabled, result.getRecords().size());
+        return Result.success(result);
+    }
+
+    /**
      * 查询单个设备详情。
      */
     @GetMapping("/{deviceId}")
@@ -96,38 +146,40 @@ public class DeviceController {
      * 新增设备。
      */
     @PostMapping
-    public Result<Void> create(@RequestBody Device device,
-                               HttpServletRequest httpRequest) {
+    public Result<Device> create(@RequestBody Device device,
+                                 HttpServletRequest httpRequest) {
         if (device.getDeviceId() == null || device.getDeviceId().isBlank()) {
-            return Result.error("设备编号不能为空");
+            return Result.error(400, "设备编号不能为空");
         }
 
-        // 检查 deviceId 唯一性
+        // 检查 deviceId 唯一性（包含已删除的数据，因为唯一索引仍占用）
         Device exist = deviceService.lambdaQuery()
                 .eq(Device::getDeviceId, device.getDeviceId())
                 .one();
         if (exist != null) {
-            return Result.error("设备编号已存在");
+            return Result.error(409, "设备编号已存在");
         }
 
         if (device.getStatus() == null) device.setStatus(1);
         if (device.getEnabled() == null) device.setEnabled(true);
+        if (device.getHealthScore() == null) device.setHealthScore(new BigDecimal("100.00"));
+        if (device.getTopicPrefix() == null || device.getTopicPrefix().isBlank()) device.setTopicPrefix("streetlight");
         device.setDeleted(false);
         deviceService.save(device);
 
         saveAuditLog("DEVICE_CREATE", "DEVICE", device.getDeviceId(),
                 "新增设备-" + device.getName(), "SUCCESS", httpRequest);
         log.info("[设备] 新增: deviceId={}, name={}", device.getDeviceId(), device.getName());
-        return Result.success();
+        return Result.success(device);
     }
 
     /**
      * 更新设备信息。
      */
     @PutMapping("/{deviceId}")
-    public Result<Void> update(@PathVariable String deviceId,
-                               @RequestBody Device device,
-                               HttpServletRequest httpRequest) {
+    public Result<Device> update(@PathVariable String deviceId,
+                                 @RequestBody Device device,
+                                 HttpServletRequest httpRequest) {
         Device existing = deviceService.lambdaQuery()
                 .eq(Device::getDeviceId, deviceId)
                 .eq(Device::getDeleted, false)
@@ -135,7 +187,7 @@ public class DeviceController {
         if (existing == null) {
             saveAuditLog("DEVICE_UPDATE", "DEVICE", deviceId,
                     "设备不存在-更新失败", "FAIL", httpRequest);
-            return Result.error("设备不存在");
+            return Result.error(404, "设备不存在");
         }
 
         // 只更新允许修改的字段
@@ -143,13 +195,23 @@ public class DeviceController {
         if (device.getArea() != null) existing.setArea(device.getArea());
         if (device.getLocation() != null) existing.setLocation(device.getLocation());
         if (device.getStatus() != null) existing.setStatus(device.getStatus());
+        if (device.getHealthScore() != null) existing.setHealthScore(device.getHealthScore());
+        if (device.getTopicPrefix() != null) {
+            existing.setTopicPrefix(device.getTopicPrefix().isBlank() ? "streetlight" : device.getTopicPrefix());
+        }
         if (device.getEnabled() != null) existing.setEnabled(device.getEnabled());
         deviceService.updateById(existing);
+
+        // 重新查询返回最新数据
+        Device updated = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId)
+                .eq(Device::getDeleted, false)
+                .one();
 
         saveAuditLog("DEVICE_UPDATE", "DEVICE", deviceId,
                 "更新设备-" + existing.getName(), "SUCCESS", httpRequest);
         log.info("[设备] 更新: deviceId={}, name={}", deviceId, existing.getName());
-        return Result.success();
+        return Result.success(updated);
     }
 
     /**
@@ -170,6 +232,7 @@ public class DeviceController {
 
         existing.setDeleted(true);
         existing.setEnabled(false);
+        existing.setStatus(0);
         deviceService.updateById(existing);
 
         saveAuditLog("DEVICE_DELETE", "DEVICE", deviceId,
