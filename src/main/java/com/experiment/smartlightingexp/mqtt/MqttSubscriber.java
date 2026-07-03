@@ -9,6 +9,7 @@ import com.experiment.smartlightingexp.engine.DecisionEngine;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -16,7 +17,6 @@ import org.eclipse.paho.client.mqttv3.MqttCallback;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
 @Slf4j
 @Component
@@ -43,21 +43,24 @@ public class MqttSubscriber {
                 try {
                     String json = new String(message.getPayload());
                     Telemetry telemetry = objectMapper.readValue(json, Telemetry.class);
-                    String deviceId = topic.split("/")[1];
-                    if (!StringUtils.hasText(telemetry.getDeviceId())) {
-                        telemetry.setDeviceId(deviceId);
-                    }
                     telemetryMapper.insert(telemetry);
+                    String deviceId = topic.split("/")[1];
+
+                    // 更新设备心跳时间戳、在线状态和数据快照
                     deviceMapper.update(null,
                             Wrappers.<Device>lambdaUpdate()
                                     .eq(Device::getDeviceId, deviceId)
-                                    .set(Device::getLatestData, json));
-                    alarmRecordService.markDeviceOnline(deviceId, telemetry.getCollectedAt());
+                                    .set(Device::getLatestData, json)
+                                    .set(Device::getLastHeartbeatAt, LocalDateTime.now())
+                                    .set(Device::getStatus, 1));
                     log.info("  [{}] ← MQTT received → DB inserted (id={})",
                             deviceId, telemetry.getId());
 
                     // 触发 AI 策略引擎评估
                     decisionEngine.evaluate(deviceId, telemetry);
+
+                    // 自动恢复离线告警（设备重新上报说明已恢复在线）
+                    alarmRecordService.resolveOfflineAlarm(deviceId);
                 } catch (Exception e) {
                     log.error("  [{}] ✗ process failed: {}", topic, e.getMessage());
                 }
