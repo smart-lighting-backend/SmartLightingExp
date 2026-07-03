@@ -2,6 +2,11 @@ spring:
   application:
     name: SmartLightingExp
 
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    date-format: yyyy-MM-dd'T'HH:mm:ss
+
   datasource:
     url: jdbc:mysql://rm-bp1vhdjtj6xp496p09o.mysql.rds.aliyuncs.com:3306/smart_lighting_db?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: app_user
