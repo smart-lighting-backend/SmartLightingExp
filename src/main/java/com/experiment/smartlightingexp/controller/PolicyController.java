@@ -2,19 +2,27 @@ package com.experiment.smartlightingexp.controller;
 
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
+import com.experiment.smartlightingexp.dto.LuxThresholdRequest;
+import com.experiment.smartlightingexp.dto.LuxThresholdResponse;
 import com.experiment.smartlightingexp.dto.PolicyRequest;
 import com.experiment.smartlightingexp.entity.AuditLog;
 import com.experiment.smartlightingexp.entity.LightingPolicy;
 import com.experiment.smartlightingexp.mapper.AuditLogMapper;
 import com.experiment.smartlightingexp.service.LightingPolicyService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 照明策略控制器 — 策略的增删改查与启停管理。
@@ -26,8 +34,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class PolicyController {
 
+    private static final String POLICY_TYPE_THRESHOLD = "THRESHOLD";
+    private static final String CONDITION_LUX_LT = "lux_lt";
+    private static final String CONDITION_LUX_GT = "lux_gt";
+
     private final LightingPolicyService lightingPolicyService;
     private final AuditLogMapper auditLogMapper;
+    private final ObjectMapper objectMapper;
 
     /**
      * 查询所有策略（未删除）。
@@ -39,6 +52,70 @@ public class PolicyController {
                 .orderByAsc(LightingPolicy::getPriority)
                 .list();
         return Result.success(list);
+    }
+
+    /**
+     * 查询当前光照阈值配置。
+     */
+    @GetMapping("/lux-threshold")
+    public Result<LuxThresholdResponse> getLuxThreshold() {
+        LightingPolicy policy = findLuxThresholdPolicy();
+        if (policy == null) {
+            return Result.error(404, "光照阈值策略不存在");
+        }
+
+        try {
+            Map<String, Object> conditions = parseConditions(policy.getConditions());
+            return Result.success(buildLuxThresholdResponse(policy, conditions));
+        } catch (JsonProcessingException e) {
+            log.error("[策略] 光照阈值条件 JSON 解析失败: id={}, conditions={}",
+                    policy.getId(), policy.getConditions(), e);
+            return Result.error(500, "策略条件 JSON 格式错误");
+        }
+    }
+
+    /**
+     * 更新光照阈值配置。
+     */
+    @PutMapping("/lux-threshold")
+    public Result<LuxThresholdResponse> updateLuxThreshold(@Valid @RequestBody LuxThresholdRequest request,
+                                                           HttpServletRequest httpRequest) {
+        if (request.getLuxLt().compareTo(request.getLuxGt()) >= 0) {
+            saveAuditLog("THRESHOLD_SET", "THRESHOLD", "-",
+                    "光照阈值参数非法-设置失败", "FAIL", httpRequest);
+            return Result.error(400, "开灯光照阈值必须小于关灯光照阈值");
+        }
+
+        LightingPolicy policy = findLuxThresholdPolicy();
+        if (policy == null) {
+            saveAuditLog("THRESHOLD_SET", "THRESHOLD", "-",
+                    "光照阈值策略不存在-设置失败", "FAIL", httpRequest);
+            return Result.error(404, "光照阈值策略不存在");
+        }
+
+        try {
+            Map<String, Object> conditions = parseConditions(policy.getConditions());
+            conditions.put(CONDITION_LUX_LT, request.getLuxLt());
+            conditions.put(CONDITION_LUX_GT, request.getLuxGt());
+
+            String conditionsJson = objectMapper.writeValueAsString(conditions);
+            policy.setConditions(conditionsJson);
+            lightingPolicyService.updateById(policy);
+
+            saveAuditLog("THRESHOLD_SET", "THRESHOLD", String.valueOf(policy.getId()),
+                    "设置光照阈值-lux_lt=" + request.getLuxLt().toPlainString()
+                            + ",lux_gt=" + request.getLuxGt().toPlainString(),
+                    "SUCCESS", httpRequest);
+            log.info("[策略] 光照阈值更新: policyId={}, lux_lt={}, lux_gt={}",
+                    policy.getId(), request.getLuxLt(), request.getLuxGt());
+            return Result.success(buildLuxThresholdResponse(policy, conditions));
+        } catch (JsonProcessingException e) {
+            saveAuditLog("THRESHOLD_SET", "THRESHOLD", String.valueOf(policy.getId()),
+                    "策略条件JSON格式错误-设置失败", "FAIL", httpRequest);
+            log.error("[策略] 光照阈值条件 JSON 处理失败: id={}, conditions={}",
+                    policy.getId(), policy.getConditions(), e);
+            return Result.error(500, "策略条件 JSON 格式错误");
+        }
     }
 
     /**
@@ -148,6 +225,61 @@ public class PolicyController {
                 (newEnabled ? "启用" : "禁用") + "策略-" + existing.getName(), "SUCCESS", httpRequest);
         log.info("[策略] 切换: id={}, enabled={}", id, newEnabled);
         return Result.success();
+    }
+
+    // ======================== 光照阈值 ========================
+
+    private LightingPolicy findLuxThresholdPolicy() {
+        List<LightingPolicy> policies = lightingPolicyService.lambdaQuery()
+                .eq(LightingPolicy::getPolicyType, POLICY_TYPE_THRESHOLD)
+                .eq(LightingPolicy::getDeleted, false)
+                .orderByAsc(LightingPolicy::getPriority)
+                .list();
+        if (policies.isEmpty()) {
+            return null;
+        }
+
+        return policies.stream()
+                .filter(policy -> hasLuxCondition(policy.getConditions()))
+                .findFirst()
+                .orElse(policies.get(0));
+    }
+
+    private boolean hasLuxCondition(String conditions) {
+        return conditions != null
+                && (conditions.contains("\"" + CONDITION_LUX_LT + "\"")
+                || conditions.contains("\"" + CONDITION_LUX_GT + "\""));
+    }
+
+    private Map<String, Object> parseConditions(String conditionsJson) throws JsonProcessingException {
+        if (conditionsJson == null || conditionsJson.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        return objectMapper.readValue(conditionsJson, new TypeReference<LinkedHashMap<String, Object>>() {
+        });
+    }
+
+    private LuxThresholdResponse buildLuxThresholdResponse(LightingPolicy policy, Map<String, Object> conditions) {
+        LuxThresholdResponse response = new LuxThresholdResponse();
+        response.setPolicyId(policy.getId());
+        response.setPolicyName(policy.getName());
+        response.setLuxLt(toBigDecimal(conditions.get(CONDITION_LUX_LT)));
+        response.setLuxGt(toBigDecimal(conditions.get(CONDITION_LUX_GT)));
+        response.setConditions(policy.getConditions());
+        response.setEnabled(policy.getEnabled());
+        response.setPriority(policy.getPriority());
+        return response;
+    }
+
+    private BigDecimal toBigDecimal(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return new BigDecimal(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     // ======================== 审计日志 ========================
