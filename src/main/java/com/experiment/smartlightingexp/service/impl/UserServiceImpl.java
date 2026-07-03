@@ -15,6 +15,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public User getByUsername(String username) {
-        return lambdaQuery().eq(User::getUsername, username).one();
+        return lambdaQuery()
+                .eq(User::getUsername, username)
+                .eq(User::getDeleted, false)
+                .one();
     }
 }

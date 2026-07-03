@@ -43,6 +43,9 @@ public class User {
     /** 最后登录时间 */
     private LocalDateTime lastLoginTime;
 
+    /** 软删除标记 */
+    private Boolean deleted;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;
