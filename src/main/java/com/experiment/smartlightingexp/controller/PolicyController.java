@@ -1,13 +1,14 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.LuxThresholdRequest;
 import com.experiment.smartlightingexp.dto.LuxThresholdResponse;
 import com.experiment.smartlightingexp.dto.PolicyRequest;
-import com.experiment.smartlightingexp.entity.AuditLog;
-import com.experiment.smartlightingexp.entity.LightingPolicy;
-import com.experiment.smartlightingexp.mapper.AuditLogMapper;
+import com.experiment.smartlightingexp.engine.DecisionEngine;
+import com.experiment.smartlightingexp.entity.*;
+import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.service.LightingPolicyService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -20,9 +21,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * 照明策略控制器 — 策略的增删改查与启停管理。
@@ -40,6 +39,8 @@ public class PolicyController {
 
     private final LightingPolicyService lightingPolicyService;
     private final AuditLogMapper auditLogMapper;
+    private final DecisionLogMapper decisionLogMapper;
+    private final DecisionEngine decisionEngine;
     private final ObjectMapper objectMapper;
 
     /**
@@ -320,5 +321,97 @@ public class PolicyController {
             ip = ip.split(",")[0].trim();
         }
         return ip;
+    }
+
+    // ───────────── 策略执行历史 ─────────────
+
+    @GetMapping("/{id}/history")
+    public Result<Map<String, Object>> history(@PathVariable Long id,
+                                               @RequestParam(defaultValue = "7") int days) {
+        LightingPolicy policy = lightingPolicyService.getById(id);
+        if (policy == null) return Result.error("策略不存在");
+
+        List<DecisionLog> logs = decisionLogMapper.selectList(
+                new LambdaQueryWrapper<DecisionLog>()
+                        .eq(DecisionLog::getMatchedPolicy, policy.getName())
+                        .eq(DecisionLog::getResult, "MATCH_EXECUTED")
+                        .ge(DecisionLog::getCreateTime, LocalDateTime.now().minusDays(days))
+                        .orderByDesc(DecisionLog::getCreateTime));
+
+        // 按日期统计触发次数
+        Map<String, Long> dailyCount = new LinkedHashMap<>();
+        for (DecisionLog log : logs) {
+            String day = log.getCreateTime().toLocalDate().toString();
+            dailyCount.merge(day, 1L, Long::sum);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("policyName", policy.getName());
+        result.put("totalTriggers", logs.size());
+        result.put("dailyCount", dailyCount);
+        result.put("records", logs.size() > 200 ? logs.subList(0, 200) : logs); // 最多200条
+        return Result.success(result);
+    }
+
+    // ───────────── 策略模拟测试 ─────────────
+
+    @PostMapping("/test")
+    public Result<Map<String, Object>> test(@RequestBody Map<String, Object> input) {
+        // 用输入构造虚拟 Telemetry
+        Telemetry t = new Telemetry();
+        t.setDeviceId(input.getOrDefault("deviceId", "TEST-001").toString());
+        t.setIlluminance(toBd(input.get("illuminance")));
+        t.setTemperature(toBd(input.get("temperature")));
+        t.setHumidity(toBd(input.get("humidity")));
+        t.setPir(input.get("pir") != null ? Integer.parseInt(input.get("pir").toString()) : null);
+        t.setTrafficFlow(input.get("trafficFlow") != null ? Integer.parseInt(input.get("trafficFlow").toString()) : null);
+        t.setCollectedAt(LocalDateTime.now());
+
+        // 查所有启用策略，找匹配的
+        List<LightingPolicy> policies = lightingPolicyService.lambdaQuery()
+                .eq(LightingPolicy::getEnabled, true)
+                .eq(LightingPolicy::getDeleted, false)
+                .orderByAsc(LightingPolicy::getPriority).list();
+
+        List<Map<String, Object>> allResults = new ArrayList<>();
+        LightingPolicy matched = null;
+
+        for (LightingPolicy p : policies) {
+            boolean hit = decisionEngine.matchesCondition(p.getConditions(), t);
+            Map<String, Object> pr = new LinkedHashMap<>();
+            pr.put("policyId", p.getId());
+            pr.put("policyName", p.getName());
+            pr.put("action", p.getAction());
+            pr.put("hit", hit);
+
+            // 解析每个条件
+            List<Map<String, Object>> condDetails = new ArrayList<>();
+            if (p.getConditions() != null && !p.getConditions().isBlank()) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> conds = objectMapper.readValue(p.getConditions(), Map.class);
+                    for (Map.Entry<String, Object> e : conds.entrySet()) {
+                        if (List.of("group", "startTime", "endTime", "extraActions").contains(e.getKey())) continue;
+                        condDetails.add(Map.of("key", e.getKey(), "value", e.getValue()));
+                    }
+                } catch (Exception ignored) {}
+            }
+            pr.put("conditions", condDetails);
+            allResults.add(pr);
+            if (hit && matched == null) matched = p;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("input", input);
+        result.put("matched", matched != null);
+        result.put("matchedPolicy", matched != null ? matched.getName() : null);
+        result.put("matchedAction", matched != null ? matched.getAction() : null);
+        result.put("allResults", allResults);
+        return Result.success(result);
+    }
+
+    private BigDecimal toBd(Object v) {
+        if (v == null) return null;
+        try { return new BigDecimal(v.toString()); } catch (Exception e) { return null; }
     }
 }

@@ -105,7 +105,7 @@ public class DecisionEngine {
     // ======================== 条件匹配器 ========================
 
     @SuppressWarnings("unchecked")
-    boolean matchesCondition(String conditionsJson, Telemetry telemetry) {
+    public boolean matchesCondition(String conditionsJson, Telemetry telemetry) {
         if (conditionsJson == null || conditionsJson.isBlank()) {
             return false;
         }
