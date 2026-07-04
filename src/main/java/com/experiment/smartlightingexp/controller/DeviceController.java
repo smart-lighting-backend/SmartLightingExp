@@ -6,10 +6,11 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.DeviceQueryRequest;
-import com.experiment.smartlightingexp.entity.Device;
-import com.experiment.smartlightingexp.entity.AuditLog;
+import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.AuditLogMapper;
-import com.experiment.smartlightingexp.service.DeviceService;
+import com.experiment.smartlightingexp.service.*;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.*;
 
 /**
  * 设备管理控制器 — 设备增删改查 + 组合条件分页查询。
@@ -30,6 +32,10 @@ public class DeviceController {
 
     private final DeviceService deviceService;
     private final AuditLogMapper auditLogMapper;
+    private final VisionEventService visionEventService;
+    private final VoiceEventService voiceEventService;
+    private final AlarmRecordService alarmRecordService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 组合条件分页查询设备列表。
@@ -274,5 +280,83 @@ public class DeviceController {
             ip = ip.split(",")[0].trim();
         }
         return ip;
+    }
+
+    /** 融合感知面板：聚合遥测 + 视觉 + 语音 + 告警 + 健康分 */
+    @GetMapping("/{deviceId}/perception")
+    public Result<Map<String, Object>> perception(@PathVariable String deviceId) {
+        Device device = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId).eq(Device::getDeleted, false).one();
+        if (device == null) return Result.error("设备不存在");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", device.getDeviceId());
+        result.put("deviceName", device.getName());
+        result.put("status", device.getStatus());
+        result.put("lastHeartbeatAt", device.getLastHeartbeatAt() != null ? device.getLastHeartbeatAt().toString() : null);
+        result.put("healthScore", device.getHealthScore());
+
+        // 遥测快照
+        if (device.getLatestData() != null && !device.getLatestData().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> telemetry = objectMapper.readValue(device.getLatestData(), Map.class);
+                result.put("telemetry", telemetry);
+            } catch (JsonProcessingException e) {
+                result.put("telemetry", null);
+            }
+        } else {
+            result.put("telemetry", null);
+        }
+
+        // 最新视觉事件
+        VisionEvent ve = visionEventService.getOne(
+                new LambdaQueryWrapper<VisionEvent>()
+                        .eq(VisionEvent::getDeviceId, deviceId)
+                        .orderByDesc(VisionEvent::getOccurredAt).last("LIMIT 1"));
+        if (ve != null) {
+            Map<String, Object> veMap = new LinkedHashMap<>();
+            veMap.put("eventType", ve.getEventType());
+            veMap.put("confidence", ve.getConfidence());
+            veMap.put("snapshotRef", ve.getSnapshotRef());
+            veMap.put("occurredAt", ve.getOccurredAt() != null ? ve.getOccurredAt().toString() : null);
+            result.put("latestVision", veMap);
+        } else {
+            result.put("latestVision", null);
+        }
+
+        // 最新语音事件
+        VoiceEvent vo = voiceEventService.getOne(
+                new LambdaQueryWrapper<VoiceEvent>()
+                        .eq(VoiceEvent::getDeviceId, deviceId)
+                        .orderByDesc(VoiceEvent::getOccurredAt).last("LIMIT 1"));
+        if (vo != null) {
+            Map<String, Object> voMap = new LinkedHashMap<>();
+            voMap.put("type", vo.getType());
+            voMap.put("content", vo.getContent());
+            voMap.put("source", vo.getSource());
+            voMap.put("occurredAt", vo.getOccurredAt() != null ? vo.getOccurredAt().toString() : null);
+            result.put("latestVoice", voMap);
+        } else {
+            result.put("latestVoice", null);
+        }
+
+        // 最近告警
+        List<AlarmRecord> alarms = alarmRecordService.list(
+                new LambdaQueryWrapper<AlarmRecord>()
+                        .eq(AlarmRecord::getDeviceId, deviceId)
+                        .orderByDesc(AlarmRecord::getStartAt).last("LIMIT 3"));
+        List<Map<String, Object>> alarmList = new ArrayList<>();
+        for (AlarmRecord a : alarms) {
+            Map<String, Object> am = new LinkedHashMap<>();
+            am.put("type", a.getType());
+            am.put("level", a.getLevel());
+            am.put("startAt", a.getStartAt() != null ? a.getStartAt().toString() : null);
+            am.put("recoverAt", a.getRecoverAt() != null ? a.getRecoverAt().toString() : null);
+            alarmList.add(am);
+        }
+        result.put("recentAlarms", alarmList);
+
+        return Result.success(result);
     }
 }
