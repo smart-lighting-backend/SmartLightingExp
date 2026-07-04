@@ -1,18 +1,19 @@
 package com.experiment.smartlightingexp.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.experiment.smartlightingexp.common.BusinessException;
 import com.experiment.smartlightingexp.dto.AssistantChatResponse;
-import com.experiment.smartlightingexp.entity.LightingPolicy;
+import com.experiment.smartlightingexp.entity.*;
+import com.experiment.smartlightingexp.mapper.*;
+import com.experiment.smartlightingexp.service.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.math.RoundingMode;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,6 +31,9 @@ public class AssistantService {
     private final MaxKbClient maxKbClient;
     private final LightingPolicyService lightingPolicyService;
     private final ObjectMapper objectMapper;
+    private final DeviceService deviceService;
+    private final AlarmRecordService alarmRecordService;
+    private final ControlCommandMapper controlCommandMapper;
 
     public AssistantChatResponse chat(String rawMessage) {
         String message = rawMessage.trim();
@@ -127,6 +131,80 @@ public class AssistantService {
             return null;
         }
         return new BigDecimal(value.toString());
+    }
+
+    // ───────────── 设备诊断 ─────────────
+    public AssistantChatResponse diagnose(String deviceId, String question) {
+        Device device = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId).eq(Device::getDeleted, false).one();
+        if (device == null) return AssistantChatResponse.knowledge("设备 " + deviceId + " 不存在。");
+
+        StringBuilder ctx = new StringBuilder();
+        ctx.append("你是一个智慧路灯维修专家。请根据以下设备实时状态数据，分析可能原因并给出维修建议。\n\n");
+        ctx.append("设备: ").append(device.getDeviceId())
+                .append(" (").append(device.getName() != null ? device.getName() : "").append(")\n");
+        ctx.append("区域: ").append(device.getArea() != null ? device.getArea() : "未知").append("\n");
+        ctx.append("健康评分: ").append(device.getHealthScore() != null ? device.getHealthScore() : "未评估").append("\n");
+        ctx.append("状态: ").append(statusLabel(device.getStatus())).append("\n");
+
+        // 最近告警
+        List<AlarmRecord> alarms = alarmRecordService.list(
+                new LambdaQueryWrapper<AlarmRecord>().eq(AlarmRecord::getDeviceId, deviceId)
+                        .orderByDesc(AlarmRecord::getStartAt).last("LIMIT 5"));
+        if (!alarms.isEmpty()) {
+            ctx.append("最近告警:\n");
+            for (AlarmRecord a : alarms) {
+                ctx.append("  - ").append(a.getType()).append(" (")
+                        .append(a.getStartAt()).append(")");
+                if (a.getRecoverAt() != null) ctx.append(" 已恢复");
+                ctx.append("\n");
+            }
+        } else {
+            ctx.append("最近告警: 无\n");
+        }
+
+        // 指令响应率
+        List<ControlCommand> cmds = controlCommandMapper.selectList(
+                new LambdaQueryWrapper<ControlCommand>().eq(ControlCommand::getDeviceId, deviceId)
+                        .ge(ControlCommand::getIssuedAt, java.time.LocalDateTime.now().minusDays(7)));
+        long acked = cmds.stream().filter(c -> c.getAckAt() != null).count();
+        ctx.append("指令响应率: ").append(cmds.isEmpty() ? "无记录" :
+                Math.round(100.0 * acked / cmds.size()) + "% (" + acked + "/" + cmds.size() + ")").append("\n");
+
+        // 遥测快照
+        if (device.getLatestData() != null && !device.getLatestData().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> tel = objectMapper.readValue(device.getLatestData(), Map.class);
+                ctx.append("当前遥测: ").append(tel).append("\n");
+            } catch (Exception ignored) {}
+        }
+
+        if (question != null && !question.isBlank()) {
+            ctx.append("\n用户问题: ").append(question).append("\n");
+        } else {
+            ctx.append("\n请分析该设备健康状态并给出维修建议。\n");
+        }
+
+        try {
+            return AssistantChatResponse.knowledge(maxKbClient.chat(ctx.toString()));
+        } catch (Exception e) {
+            return AssistantChatResponse.knowledge(
+                    "设备 " + deviceId + " 实时状态：健康评分 " +
+                    (device.getHealthScore() != null ? device.getHealthScore() : "未评估") +
+                    "，状态 " + statusLabel(device.getStatus()) +
+                    "，最近告警 " + alarms.size() + " 条。" +
+                    "\n(MaxKB 服务不可用，以上为基础数据摘要，请人工判断)");
+        }
+    }
+
+    private String statusLabel(Integer s) {
+        return switch (s != null ? s : 0) {
+            case 1 -> "在线";
+            case 2 -> "离线";
+            case 3 -> "异常";
+            default -> "停用";
+        };
     }
 
     private String plain(BigDecimal value) {
