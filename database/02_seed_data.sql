@@ -54,5 +54,6 @@ INSERT INTO alarm_record (device_id, type, level, status, reason, start_at, reco
 -- 5. lighting_policy — 照明策略
 -- ============================================================
 INSERT INTO lighting_policy (name, policy_type, conditions, action, priority, enabled, deleted, effective_time) VALUES
-('光照联动自动开关', 'THRESHOLD', '{"lux_lt": 50, "lux_gt": 200}', 'ON', 1, 1, 0, '全天'),
+('光照低自动开灯', 'THRESHOLD', '{"lux_lt": 50}', 'ON', 1, 1, 0, '全天'),
+('光照高自动关灯', 'THRESHOLD', '{"lux_gt": 200}', 'OFF', 2, 1, 0, '全天'),
 ('深夜节能调光', 'TIME', '{"time_range": "23:00-05:59"}', 'DIMMING(30)', 10, 1, 0, '23:00 ~ 06:00');

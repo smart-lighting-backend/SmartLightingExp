@@ -47,6 +47,9 @@ public class DecisionEngine {
      * 由 MqttSubscriber 在收到新遥测后调用。
      */
     public void evaluate(String deviceId, Telemetry telemetry) {
+        log.info("[{}] DecisionEngine evaluate: lux={}, pir={}", deviceId,
+                telemetry.getIlluminance(), telemetry.getPir());
+
         // 1. 获取设备信息，检查手动锁定
         Device device = deviceMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Device>()
@@ -208,6 +211,31 @@ public class DecisionEngine {
             log.info("[{}] Auto control → {} (policy={})", deviceId, action, policyName);
         } catch (Exception e) {
             log.error("[{}] DecisionEngine executeAction failed: {}", deviceId, e.getMessage());
+            // 记录失败的 control_command
+            try {
+                ControlCommand failedCmd = new ControlCommand();
+                failedCmd.setDeviceId(deviceId);
+                failedCmd.setAction(action);
+                failedCmd.setSource("AUTO");
+                failedCmd.setStatus("FAILED");
+                failedCmd.setIssuedAt(LocalDateTime.now());
+                failedCmd.setResultDetail("MQTT下发失败-" + e.getMessage());
+                controlCommandMapper.insert(failedCmd);
+            } catch (Exception ex) {
+                log.warn("[{}] Failed to persist failed control_command: {}", deviceId, ex.getMessage());
+            }
+            // 记录失败的 decision_log
+            try {
+                DecisionLog failedLog = new DecisionLog();
+                failedLog.setDeviceId(deviceId);
+                failedLog.setInputSnapshot(buildSnapshotJson(telemetry));
+                failedLog.setMatchedPolicy(policyName);
+                failedLog.setActionTaken(action);
+                failedLog.setResult("MATCH_FAILED");
+                decisionLogMapper.insert(failedLog);
+            } catch (Exception ex) {
+                log.warn("[{}] Failed to persist failed decision_log: {}", deviceId, ex.getMessage());
+            }
         }
     }
 

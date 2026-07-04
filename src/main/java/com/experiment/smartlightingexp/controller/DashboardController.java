@@ -55,14 +55,19 @@ public class DashboardController {
                 : "0.0";
 
         // 节能率：查询今日 energy_record 的平均 saving_rate
-        BigDecimal avgSavingRate = energyRecordMapper.selectList(
+        List<EnergyRecord> todayRecords = energyRecordMapper.selectList(
                 new LambdaQueryWrapper<EnergyRecord>()
                         .eq(EnergyRecord::getRecordDate, LocalDate.now())
-                        .last("LIMIT 1000"))
-                .stream()
-                .map(EnergyRecord::getSavingRate)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        .last("LIMIT 1000"));
+        BigDecimal avgSavingRate = BigDecimal.ZERO;
+        long count = todayRecords.stream().map(EnergyRecord::getSavingRate).filter(Objects::nonNull).count();
+        if (count > 0) {
+            BigDecimal sum = todayRecords.stream()
+                    .map(EnergyRecord::getSavingRate)
+                    .filter(Objects::nonNull)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            avgSavingRate = sum.divide(BigDecimal.valueOf(count), 1, RoundingMode.HALF_UP);
+        }
 
         // 今日总能耗
         BigDecimal todayEnergy = energyRecordMapper.selectList(
@@ -154,23 +159,27 @@ public class DashboardController {
         List<Device> devices = deviceMapper.selectList(
                 new LambdaQueryWrapper<Device>().eq(Device::getDeleted, false));
 
-        // 按 area 分组统计
+        // 按 area 分组统计（null/空 → 归入"未分配"）
         Map<String, List<Device>> grouped = devices.stream()
-                .filter(d -> d.getArea() != null && !d.getArea().isBlank())
-                .collect(Collectors.groupingBy(Device::getArea));
+                .collect(Collectors.groupingBy(d -> {
+                    String area = d.getArea();
+                    return (area != null && !area.isBlank()) ? area : "未分配";
+                }));
 
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, List<Device>> entry : grouped.entrySet()) {
             List<Device> list = entry.getValue();
-            long online = list.stream().filter(d -> d.getStatus() != null && d.getStatus() == 1).count();
-            long offline = list.stream().filter(d -> d.getStatus() != null && d.getStatus() == 2).count();
-            long warning = list.stream().filter(d -> d.getStatus() != null && d.getStatus() == 3).count();
+            long online   = list.stream().filter(d -> d.getStatus() != null && d.getStatus() == 1).count();
+            long offline  = list.stream().filter(d -> d.getStatus() != null && d.getStatus() == 2).count();
+            long warning  = list.stream().filter(d -> d.getStatus() != null && d.getStatus() == 3).count();
+            long disabled = list.stream().filter(d -> d.getStatus() != null && d.getStatus() == 0).count();
 
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("name", entry.getKey());
             item.put("online", online);
             item.put("offline", offline);
             item.put("warning", warning);
+            item.put("disabled", disabled);
             result.add(item);
         }
 
