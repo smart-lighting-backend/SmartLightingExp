@@ -71,7 +71,7 @@ public class UserController {
             wrapper.eq(User::getEnabled, request.getEnabled());
         }
 
-        wrapper.orderByDesc(User::getCreateTime);
+        wrapper.orderByAsc(User::getId);
 
         Page<User> page = new Page<>(request.getPage(), request.getSize());
         IPage<User> result = userService.page(page, wrapper);
