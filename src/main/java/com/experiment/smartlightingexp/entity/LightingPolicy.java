@@ -34,4 +34,10 @@ public class LightingPolicy {
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
+
+    @TableField(exist = false)
+    private Integer triggerCount;
+
+    @TableField(exist = false)
+    private LocalDateTime lastTriggerTime;
 }

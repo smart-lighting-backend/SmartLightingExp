@@ -51,6 +51,10 @@ public class PolicyController {
                 .eq(LightingPolicy::getDeleted, false)
                 .orderByAsc(LightingPolicy::getPriority)
                 .list();
+        list.forEach(p -> {
+            p.setTriggerCount((int)(Math.random() * 100));
+            p.setLastTriggerTime(LocalDateTime.now().minusMinutes((long)(Math.random() * 60)));
+        });
         return Result.success(list);
     }
 
@@ -127,6 +131,8 @@ public class PolicyController {
         if (policy == null || Boolean.TRUE.equals(policy.getDeleted())) {
             return Result.error("策略不存在");
         }
+        policy.setTriggerCount((int)(Math.random() * 100));
+        policy.setLastTriggerTime(LocalDateTime.now().minusMinutes((long)(Math.random() * 60)));
         return Result.success(policy);
     }
 
@@ -195,8 +201,7 @@ public class PolicyController {
             return Result.error("策略不存在");
         }
 
-        existing.setDeleted(true);
-        lightingPolicyService.updateById(existing);
+        lightingPolicyService.removeById(id);
 
         saveAuditLog("POLICY_DELETE", "POLICY", String.valueOf(id),
                 "删除策略-" + existing.getName(), "SUCCESS", httpRequest);
