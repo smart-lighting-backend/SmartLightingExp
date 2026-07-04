@@ -55,6 +55,29 @@ export DB_PASSWORD=your_password
 
 或在 IDEA Run Configuration 的 Environment variables 中添加 `DB_PASSWORD=your_password`。
 
+### 配置 MaxKB
+
+维护知识库问答依赖 MaxKB 应用接口。先把 `docs/路灯常见故障手册.md` 导入 MaxKB 知识库，再配置：
+
+```bash
+# Windows PowerShell
+$env:MAXKB_CHAT_COMPLETIONS_URL="http://你的MaxKB地址/api/application/应用ID/chat/completions"
+$env:MAXKB_API_KEY="你的API Key"
+```
+
+智能体统一入口：
+
+```http
+POST /api/assistant/chat
+```
+
+示例消息：
+
+```json
+{"message": "灯不亮怎么办"}
+{"message": "把阈值调到30"}
+```
+
 ### 运行
 
 ```bash

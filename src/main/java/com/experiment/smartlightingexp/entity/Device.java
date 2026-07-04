@@ -37,6 +37,9 @@ public class Device {
 
     private LocalDateTime lastManualAt;
 
+    /** 额定功率（W），用于能耗估算 */
+    private BigDecimal ratedPower;
+
     private Boolean enabled;
 
     private Boolean deleted;

@@ -106,11 +106,29 @@ public class ControlController {
         cmd.setResultDetail("手动控制-" + cmdStr);
         controlCommandMapper.insert(cmd);
 
-        // 4. 更新设备 lastManualAt — AI 锁定 30 分钟
-        deviceMapper.update(null,
-                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
-                        .eq(Device::getDeviceId, deviceId)
-                        .set(Device::getLastManualAt, LocalDateTime.now()));
+        // 4. 更新设备 — 手动锁定时间 + 设备状态快照
+        try {
+            Map<String, Object> controlState = new HashMap<>();
+            controlState.put("action", cmdStr);
+            controlState.put("brightness", "DIMMING".equals(request.getAction()) ? request.getBrightness()
+                    : ("ON".equals(request.getAction()) ? 100 : 0));
+            controlState.put("controlledAt", LocalDateTime.now().toString());
+            controlState.put("source", "MANUAL");
+            String latestDataJson = objectMapper.writeValueAsString(controlState);
+
+            deviceMapper.update(null,
+                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
+                            .eq(Device::getDeviceId, deviceId)
+                            .set(Device::getLastManualAt, LocalDateTime.now())
+                            .set(Device::getLatestData, latestDataJson));
+        } catch (Exception e) {
+            // latestData 更新失败不影响主流程，降级为只更新 lastManualAt
+            deviceMapper.update(null,
+                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
+                            .eq(Device::getDeviceId, deviceId)
+                            .set(Device::getLastManualAt, LocalDateTime.now()));
+            log.warn("[{}] Failed to update latestData: {}", deviceId, e.getMessage());
+        }
 
         // 5. 审计日志
         saveAuditLog("CONTROL", "DEVICE", deviceId, "手动控制-" + cmdStr, "SUCCESS", httpRequest);
