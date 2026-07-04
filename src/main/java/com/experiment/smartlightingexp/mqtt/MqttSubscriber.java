@@ -3,8 +3,12 @@ package com.experiment.smartlightingexp.mqtt;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
+import com.experiment.smartlightingexp.entity.VisionEvent;
+import com.experiment.smartlightingexp.entity.VoiceEvent;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.TelemetryMapper;
+import com.experiment.smartlightingexp.mapper.VisionEventMapper;
+import com.experiment.smartlightingexp.mapper.VoiceEventMapper;
 import com.experiment.smartlightingexp.engine.DecisionEngine;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,6 +29,8 @@ public class MqttSubscriber {
 
     private final MqttClient mqttClient;
     private final TelemetryMapper telemetryMapper;
+    private final VisionEventMapper visionEventMapper;
+    private final VoiceEventMapper voiceEventMapper;
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
     private final DecisionEngine decisionEngine;
@@ -42,12 +48,28 @@ public class MqttSubscriber {
             public void messageArrived(String topic, org.eclipse.paho.client.mqttv3.MqttMessage message) {
                 try {
                     String json = new String(message.getPayload());
+                    String deviceId = topic.split("/")[1];
+
+                    if (topic.endsWith("/vision/event")) {
+                        VisionEvent ve = objectMapper.readValue(json, VisionEvent.class);
+                        visionEventMapper.insert(ve);
+                        log.info("  [{}] 👁 vision event: type={}", deviceId, ve.getEventType());
+                        alarmRecordService.resolveOfflineAlarm(deviceId);
+                        return;
+                    }
+                    if (topic.endsWith("/voice/event")) {
+                        VoiceEvent vo = objectMapper.readValue(json, VoiceEvent.class);
+                        voiceEventMapper.insert(vo);
+                        log.info("  [{}] 🔊 voice event: type={}", deviceId, vo.getType());
+                        alarmRecordService.resolveOfflineAlarm(deviceId);
+                        return;
+                    }
+
+                    // telemetry topic
                     Telemetry telemetry = objectMapper.readValue(json, Telemetry.class);
                     telemetryMapper.insert(telemetry);
-                    String deviceId = topic.split("/")[1];
                     LocalDateTime now = LocalDateTime.now();
 
-                    // 检查设备是否处于手动控制模式
                     Device device = deviceMapper.selectOne(
                             Wrappers.<Device>lambdaQuery().eq(Device::getDeviceId, deviceId));
                     boolean inManual = device != null
@@ -56,7 +78,6 @@ public class MqttSubscriber {
                             && device.getManualExpireAt().isAfter(now);
 
                     if (inManual) {
-                        // 手动模式：只更新心跳和在线状态，不覆盖 latestData，不触发 AI
                         deviceMapper.update(null,
                                 Wrappers.<Device>lambdaUpdate()
                                         .eq(Device::getDeviceId, deviceId)
@@ -65,14 +86,12 @@ public class MqttSubscriber {
                         log.info("  [{}] ← MQTT received (manual mode, AI skipped) → DB inserted (id={})",
                                 deviceId, telemetry.getId());
                     } else {
-                        // 自动模式：正常更新 latestData + 触发 AI 策略引擎
                         com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device> updateWrapper =
                                 Wrappers.<Device>lambdaUpdate()
                                         .eq(Device::getDeviceId, deviceId)
                                         .set(Device::getLatestData, json)
                                         .set(Device::getLastHeartbeatAt, now)
                                         .set(Device::getStatus, 1);
-                        // 手动模式已过期则自动清除标记
                         if (device != null && Boolean.TRUE.equals(device.getManualMode())) {
                             updateWrapper.set(Device::getManualMode, false)
                                     .set(Device::getManualExpireAt, null);
@@ -81,11 +100,9 @@ public class MqttSubscriber {
                         deviceMapper.update(null, updateWrapper);
                         log.info("  [{}] ← MQTT received → DB inserted (id={})",
                                 deviceId, telemetry.getId());
-                        // 触发 AI 策略引擎评估
                         decisionEngine.evaluate(deviceId, telemetry);
                     }
 
-                    // 自动恢复离线告警（设备重新上报说明已恢复在线）
                     alarmRecordService.resolveOfflineAlarm(deviceId);
                 } catch (Exception e) {
                     log.error("  [{}] ✗ process failed: {}", topic, e.getMessage());
@@ -99,7 +116,9 @@ public class MqttSubscriber {
 
         try {
             mqttClient.subscribe("streetlight/+/telemetry", 1);
-            log.info("MQTT subscriber ready, topic=streetlight/+/telemetry");
+            mqttClient.subscribe("streetlight/+/vision/event", 1);
+            mqttClient.subscribe("streetlight/+/voice/event", 1);
+            log.info("MQTT subscriber ready, topics=telemetry,vision/event,voice/event");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
         }
