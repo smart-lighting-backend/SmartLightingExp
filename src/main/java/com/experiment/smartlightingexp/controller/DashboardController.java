@@ -8,11 +8,10 @@ import com.experiment.smartlightingexp.entity.EnergyRecord;
 import com.experiment.smartlightingexp.mapper.AlarmRecordMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.EnergyRecordMapper;
+import com.experiment.smartlightingexp.task.EnergyCalcTask;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -34,6 +33,7 @@ public class DashboardController {
     private final DeviceMapper deviceMapper;
     private final AlarmRecordMapper alarmRecordMapper;
     private final EnergyRecordMapper energyRecordMapper;
+    private final EnergyCalcTask energyCalcTask;
 
     /**
      * 仪表盘统计概览。
@@ -186,6 +186,35 @@ public class DashboardController {
         // 按区域名称排序
         result.sort(Comparator.comparing(m -> (String) m.get("name")));
 
+        return Result.success(result);
+    }
+
+    /**
+     * 手动触发当日能耗计算（保留原有 23:55 自动执行）。
+     * POST /api/dashboard/energy/calc
+     */
+    @PostMapping("/energy/calc")
+    public Result<Map<String, Object>> triggerEnergyCalc() {
+        energyCalcTask.calcDailyEnergy();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("message", "当日能耗计算已完成");
+        result.put("date", LocalDate.now().toString());
+        return Result.success(result);
+    }
+
+    /**
+     * 生成历史能耗测试数据（过去 N 天，默认 30 天）。
+     * POST /api/dashboard/energy/gen-test-data?days=30
+     */
+    @PostMapping("/energy/gen-test-data")
+    public Result<Map<String, Object>> genTestData(@RequestParam(defaultValue = "30") int days) {
+        if (days < 1 || days > 365) {
+            return Result.error(400, "天数范围：1-365");
+        }
+        energyCalcTask.generateHistoricalData(days);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("message", "历史测试数据生成完成");
+        result.put("days", days);
         return Result.success(result);
     }
 }

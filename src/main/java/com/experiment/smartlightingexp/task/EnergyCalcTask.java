@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -200,5 +201,73 @@ public class EnergyCalcTask {
 
         long minutes = Duration.between(firstCmd, dayEnd).toMinutes();
         return (int) Math.min(Math.max(minutes, 60), DEFAULT_ON_DURATION_MIN);
+    }
+
+    /**
+     * 为过去 N 天生成模拟能耗测试数据（跳过已有记录的日期）。
+     * 每天为每个已启用设备生成随机但合理的能耗记录。
+     */
+    public void generateHistoricalData(int days) {
+        LocalDate today = LocalDate.now();
+        List<Device> devices = deviceMapper.selectList(
+                Wrappers.<Device>lambdaQuery()
+                        .eq(Device::getEnabled, true)
+                        .eq(Device::getDeleted, false));
+
+        if (devices.isEmpty()) {
+            log.warn("No enabled devices found, skip historical data generation");
+            return;
+        }
+
+        Random random = new Random();
+        int totalGenerated = 0;
+
+        for (int d = days; d >= 1; d--) {
+            LocalDate recordDate = today.minusDays(d);
+            for (Device device : devices) {
+                try {
+                    EnergyRecord existing = energyRecordMapper.selectOne(
+                            Wrappers.<EnergyRecord>lambdaQuery()
+                                    .eq(EnergyRecord::getDeviceId, device.getDeviceId())
+                                    .eq(EnergyRecord::getRecordDate, recordDate));
+                    if (existing != null) continue;
+
+                    int onDurationMin = 300 + random.nextInt(421);
+                    double avgBrightness = 30 + random.nextDouble() * 70;
+
+                    BigDecimal ratedPower = device.getRatedPower() != null
+                            ? device.getRatedPower() : DEFAULT_RATED_POWER;
+                    BigDecimal ratedKw = ratedPower.divide(BigDecimal.valueOf(1000), 10, RoundingMode.HALF_UP);
+                    BigDecimal onDurationH = BigDecimal.valueOf(onDurationMin)
+                            .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
+                    BigDecimal brightnessFactor = BigDecimal.valueOf(avgBrightness)
+                            .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+                    BigDecimal estimatedKwh = ratedKw.multiply(onDurationH).multiply(brightnessFactor)
+                            .setScale(4, RoundingMode.HALF_UP);
+                    BigDecimal baselineKwh = ratedKw.multiply(onDurationH).setScale(4, RoundingMode.HALF_UP);
+                    BigDecimal savingRate = BigDecimal.valueOf(100 - avgBrightness)
+                            .setScale(1, RoundingMode.HALF_UP);
+                    if (savingRate.compareTo(BigDecimal.ZERO) < 0) savingRate = BigDecimal.ZERO;
+                    BigDecimal savedKwh = baselineKwh.subtract(estimatedKwh);
+                    BigDecimal carbonReduction = savedKwh.multiply(CARBON_FACTOR)
+                            .setScale(4, RoundingMode.HALF_UP);
+
+                    EnergyRecord record = new EnergyRecord();
+                    record.setDeviceId(device.getDeviceId());
+                    record.setRecordDate(recordDate);
+                    record.setOnDurationMin(onDurationMin);
+                    record.setAvgBrightness(BigDecimal.valueOf(avgBrightness).setScale(2, RoundingMode.HALF_UP));
+                    record.setEstimatedKwh(estimatedKwh);
+                    record.setSavingRate(savingRate);
+                    record.setCarbonReduction(carbonReduction);
+                    energyRecordMapper.insert(record);
+                    totalGenerated++;
+                } catch (Exception e) {
+                    log.error("[{}] gen historical data error for {}: {}",
+                            device.getDeviceId(), recordDate, e.getMessage());
+                }
+            }
+        }
+        log.info("===== Historical data generation done: {} records =====", totalGenerated);
     }
 }
