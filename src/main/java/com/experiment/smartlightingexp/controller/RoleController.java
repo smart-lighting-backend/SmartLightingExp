@@ -1,6 +1,5 @@
 package com.experiment.smartlightingexp.controller;
 
-import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.entity.AuditLog;
@@ -83,7 +82,6 @@ public class RoleController {
     /**
      * 新增角色。
      */
-    @RequirePermission("role:create")
     @PostMapping
     public Result<Void> create(@RequestBody Role role,
                                HttpServletRequest httpRequest) {
@@ -110,7 +108,6 @@ public class RoleController {
     /**
      * 更新角色信息。
      */
-    @RequirePermission("role:update")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id,
                                @RequestBody Role role,
@@ -135,7 +132,6 @@ public class RoleController {
     /**
      * 删除角色。
      */
-    @RequirePermission("role:delete")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id,
                                HttpServletRequest httpRequest) {
@@ -157,7 +153,6 @@ public class RoleController {
     /**
      * 分配角色权限（覆盖式：先清空旧权限，再设置新权限）。
      */
-    @RequirePermission("role:assign")
     @PutMapping("/{id}/permissions")
     public Result<Void> assignPermissions(@PathVariable Long id,
                                           @RequestBody Map<String, List<Long>> body,

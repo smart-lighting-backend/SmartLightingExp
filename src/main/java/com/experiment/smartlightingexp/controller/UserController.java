@@ -3,7 +3,6 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.UserQueryRequest;
@@ -164,7 +163,6 @@ public class UserController {
      * 新增用户。
      */
     @PostMapping
-    @RequirePermission("user:create")
     public Result<Void> create(@RequestBody User user,
                                HttpServletRequest httpRequest) {
         if (user.getUsername() == null || user.getUsername().isBlank()) {
@@ -194,7 +192,6 @@ public class UserController {
      * 更新用户信息。
      */
     @PutMapping("/{id}")
-    @RequirePermission("user:update")
     public Result<Void> update(@PathVariable Long id,
                                @RequestBody User user,
                                HttpServletRequest httpRequest) {
@@ -231,7 +228,6 @@ public class UserController {
      * 删除用户。
      */
     @DeleteMapping("/{id}")
-    @RequirePermission("user:delete")
     public Result<Void> delete(@PathVariable Long id,
                                HttpServletRequest httpRequest) {
         User existing = userService.lambdaQuery()
