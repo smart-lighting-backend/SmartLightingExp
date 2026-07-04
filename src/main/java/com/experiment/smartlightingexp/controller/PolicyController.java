@@ -240,8 +240,12 @@ public class PolicyController {
             return Result.error("策略不存在");
         }
 
-        existing.setDeleted(true);
-        lightingPolicyService.updateById(existing);
+        boolean removed = lightingPolicyService.removeById(id);
+        if (!removed) {
+            saveAuditLog("POLICY_DELETE", "POLICY", String.valueOf(id),
+                    "策略删除失败", "FAIL", httpRequest);
+            return Result.error("策略删除失败");
+        }
 
         saveAuditLog("POLICY_DELETE", "POLICY", String.valueOf(id),
                 "删除策略-" + existing.getName(), "SUCCESS", httpRequest);
