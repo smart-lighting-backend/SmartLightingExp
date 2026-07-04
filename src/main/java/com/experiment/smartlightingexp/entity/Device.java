@@ -40,6 +40,12 @@ public class Device {
     /** 额定功率（W），用于能耗估算 */
     private BigDecimal ratedPower;
 
+    /** 是否处于手动控制模式 */
+    private Boolean manualMode;
+
+    /** 手动模式过期时间 */
+    private LocalDateTime manualExpireAt;
+
     private Boolean enabled;
 
     private Boolean deleted;

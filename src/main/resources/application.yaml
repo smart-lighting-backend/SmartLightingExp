@@ -29,11 +29,14 @@ heartbeat:
   offline-threshold-seconds: 300     # 超过此秒数无遥测上报判定离线
   startup-delay-ms: 120000           # 应用启动后延迟多久开始检测（毫秒）
 
+manual:
+  lock-duration-minutes: 30          # 手动控制后 AI 锁定时长（分钟）
+
 mqtt:
   broker: tcp://47.96.27.141:1883
   username: backend
   password: 123456
-  client-id: smart-lighting-backend-v3
+  client-id: smart-lighting-backend-v666
   topic-prefix: streetlight
 
 maxkb:

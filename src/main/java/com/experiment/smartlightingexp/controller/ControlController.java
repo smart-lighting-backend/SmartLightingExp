@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.experiment.smartlightingexp.common.Result;
@@ -17,6 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -39,6 +41,9 @@ public class ControlController {
     private final MqttPublisher mqttPublisher;
     private final ObjectMapper objectMapper;
     private final AuditLogService auditLogService;
+
+    @Value("${manual.lock-duration-minutes:30}")
+    private int manualLockDurationMinutes;
 
     private static final List<String> VALID_ACTIONS = List.of("ON", "OFF", "DIMMING");
 
@@ -106,27 +111,32 @@ public class ControlController {
         cmd.setResultDetail("手动控制-" + cmdStr);
         controlCommandMapper.insert(cmd);
 
-        // 4. 更新设备 — 手动锁定时间 + 设备状态快照
+        // 4. 更新设备 — 手动模式 + 锁定时间 + 设备状态快照
+        LocalDateTime now = LocalDateTime.now();
         try {
             Map<String, Object> controlState = new HashMap<>();
             controlState.put("action", cmdStr);
             controlState.put("brightness", "DIMMING".equals(request.getAction()) ? request.getBrightness()
                     : ("ON".equals(request.getAction()) ? 100 : 0));
-            controlState.put("controlledAt", LocalDateTime.now().toString());
+            controlState.put("controlledAt", now.toString());
             controlState.put("source", "MANUAL");
             String latestDataJson = objectMapper.writeValueAsString(controlState);
 
             deviceMapper.update(null,
-                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
+                    new LambdaUpdateWrapper<Device>()
                             .eq(Device::getDeviceId, deviceId)
-                            .set(Device::getLastManualAt, LocalDateTime.now())
+                            .set(Device::getLastManualAt, now)
+                            .set(Device::getManualMode, true)
+                            .set(Device::getManualExpireAt, now.plusMinutes(manualLockDurationMinutes))
                             .set(Device::getLatestData, latestDataJson));
         } catch (Exception e) {
-            // latestData 更新失败不影响主流程，降级为只更新 lastManualAt
+            // latestData 更新失败不影响主流程，降级为只更新手动模式标记
             deviceMapper.update(null,
-                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device>()
+                    new LambdaUpdateWrapper<Device>()
                             .eq(Device::getDeviceId, deviceId)
-                            .set(Device::getLastManualAt, LocalDateTime.now()));
+                            .set(Device::getLastManualAt, now)
+                            .set(Device::getManualMode, true)
+                            .set(Device::getManualExpireAt, now.plusMinutes(manualLockDurationMinutes)));
             log.warn("[{}] Failed to update latestData: {}", deviceId, e.getMessage());
         }
 
@@ -152,6 +162,29 @@ public class ControlController {
                         .eq(ControlCommand::getDeviceId, deviceId)
                         .orderByDesc(ControlCommand::getIssuedAt));
         return Result.success(p);
+    }
+
+    /**
+     * 解除设备手动锁定，恢复自动控制。
+     * DELETE /api/devices/{deviceId}/manual-lock
+     */
+    @DeleteMapping("/{deviceId}/manual-lock")
+    public Result<Void> unlockDevice(@PathVariable String deviceId,
+                                     HttpServletRequest httpRequest) {
+        Device device = deviceMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Device>()
+                        .eq(Device::getDeviceId, deviceId));
+        if (device == null) {
+            return Result.error("设备不存在");
+        }
+        deviceMapper.update(null,
+                new LambdaUpdateWrapper<Device>()
+                        .eq(Device::getDeviceId, deviceId)
+                        .set(Device::getManualMode, false)
+                        .set(Device::getManualExpireAt, null));
+        saveAuditLog("UNLOCK", "DEVICE", deviceId, "解除手动锁定-恢复自动控制", "SUCCESS", httpRequest);
+        log.info("[{}] Manual lock released, AI control resumed", deviceId);
+        return Result.success();
     }
 
     /**

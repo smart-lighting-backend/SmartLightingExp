@@ -15,7 +15,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.HashMap;
@@ -39,7 +38,7 @@ public class DecisionEngine {
     private final MqttPublisher mqttPublisher;
     private final ObjectMapper objectMapper;
 
-    /** 手动控制后的 AI 锁定时间（分钟） */
+    /** 手动控制后的 AI 锁定时间（分钟），由 MqttSubscriber 统一管理过期清除 */
     private static final long MANUAL_LOCK_MINUTES = 30;
 
     /**
@@ -97,11 +96,10 @@ public class DecisionEngine {
     // ======================== 手动锁定检测 ========================
 
     private boolean isManuallyLocked(Device device) {
-        if (device.getLastManualAt() == null) {
-            return false; // 从未手动操作过，不受锁定
-        }
-        Duration elapsed = Duration.between(device.getLastManualAt(), LocalDateTime.now());
-        return elapsed.toMinutes() < MANUAL_LOCK_MINUTES;
+        if (!Boolean.TRUE.equals(device.getManualMode())) return false;
+        if (device.getManualExpireAt() == null) return false;
+        // 过期则由 MqttSubscriber 下一次遥测时清除，此处不重复写库
+        return device.getManualExpireAt().isAfter(LocalDateTime.now());
     }
 
     // ======================== 条件匹配器 ========================
