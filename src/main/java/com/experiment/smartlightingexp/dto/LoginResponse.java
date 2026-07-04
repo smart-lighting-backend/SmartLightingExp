@@ -3,6 +3,8 @@ package com.experiment.smartlightingexp.dto;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 登录响应结果。
  */
@@ -13,4 +15,10 @@ public class LoginResponse {
     private String token;
     private String username;
     private String roleCode;
+
+    /** 当前用户的权限编码列表（前端按钮级控制） */
+    private List<String> permissions;
+
+    /** 当前用户可见的菜单树（前端动态导航） */
+    private List<MenuTreeNode> menus;
 }

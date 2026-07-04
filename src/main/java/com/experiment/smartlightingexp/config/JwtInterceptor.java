@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.config;
 
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.util.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -7,6 +8,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
 
@@ -76,6 +78,26 @@ public class JwtInterceptor implements HandlerInterceptor {
 
         SecurityContext.setCurrentUser(
                 new SecurityContext.UserInfo(username, roleCode, permissions));
+
+        // 5. 校验方法级权限（@RequirePermission 注解）
+        if (handler instanceof HandlerMethod) {
+            HandlerMethod handlerMethod = (HandlerMethod) handler;
+            RequirePermission annotation = handlerMethod.getMethodAnnotation(RequirePermission.class);
+            if (annotation != null) {
+                String requiredPermission = annotation.value();
+                if (!permissions.contains(requiredPermission)) {
+                    log.warn("[权限拦截] 用户 {} 缺少权限: {}, 路径: {}",
+                            username, requiredPermission, path);
+                    response.setStatus(403);
+                    response.setContentType("application/json;charset=utf-8");
+                    response.getWriter().write(
+                            "{\"code\":403,\"msg\":\"权限不足，需要 " + requiredPermission + "\",\"data\":null}");
+                    SecurityContext.clear();
+                    return false;
+                }
+                log.debug("[权限拦截] 用户 {} 通过权限校验: {}", username, requiredPermission);
+            }
+        }
 
         log.debug("[JWT拦截] 用户已认证: username={}, role={}", username, roleCode);
         return true;

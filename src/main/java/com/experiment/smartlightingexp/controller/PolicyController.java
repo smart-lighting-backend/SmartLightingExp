@@ -230,7 +230,7 @@ public class PolicyController {
     }
 
     /**
-     * 删除策略（软删除）。
+     * 删除策略（逻辑删除）。
      */
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id,

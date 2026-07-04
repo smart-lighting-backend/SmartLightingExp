@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
  */
 @Data
 @TableName("user")
+@JsonIgnoreProperties({"roleName", "roleCode"})
 public class User {
 
     @TableId(type = IdType.AUTO)
