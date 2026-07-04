@@ -137,8 +137,8 @@ public class DecisionEngine {
             case "traffic_lt" -> t.getTrafficFlow() != null && t.getTrafficFlow() < intVal(value);
             case "time_range" -> isInTimeRange(value.toString());
             default -> {
-                log.warn("Unknown condition key: {}", key);
-                yield false;
+                // 跳过 group / startTime / extraActions 等元数据字段
+                yield true;
             }
         };
     }

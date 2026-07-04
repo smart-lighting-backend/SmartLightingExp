@@ -55,24 +55,24 @@ public class MockDataGenerator {
 
         int successCount = 0;
         for (Device device : devices) {
-            int illuminance = random.nextInt(2000);
-            double temperature = 15 + (40 - 15) * random.nextDouble();
-            int humidity = 40 + random.nextInt(50);
-            int pm25 = 10 + random.nextInt(140);
-            int aqi = random.nextInt(200);
-            int pir = random.nextInt(2);
-            int trafficFlow = random.nextInt(50);
+            int illuminance = random.nextInt(2000);   // 光照强度（lux）
+            double temperature = 15 + (40 - 15) * random.nextDouble();  // 温度（℃）
+            int humidity = 40 + random.nextInt(50);       // 湿度（%）
+            int pm25 = 10 + random.nextInt(140);          // PM2.5 浓度（μg/m³）
+            int aqi = random.nextInt(200);                // 空气质量指数
+            int pir = random.nextInt(2);                  // 人体红外检测 0-无人 1-有人
+            int trafficFlow = random.nextInt(50);         // 车流量（辆/分钟）
 
             Map<String, Object> data = new HashMap<>();
-            data.put("deviceId", device.getDeviceId());
-            data.put("illuminance", BigDecimal.valueOf(illuminance));
-            data.put("temperature", BigDecimal.valueOf(temperature).setScale(2, RoundingMode.HALF_UP));
-            data.put("humidity", BigDecimal.valueOf(humidity));
-            data.put("pm25", BigDecimal.valueOf(pm25));
-            data.put("aqi", aqi);
-            data.put("pir", pir);
-            data.put("trafficFlow", trafficFlow);
-            data.put("collectedAt", LocalDateTime.now().toString());
+            data.put("deviceId", device.getDeviceId());   // 设备编号
+            data.put("illuminance", BigDecimal.valueOf(illuminance));   // 光照强度
+            data.put("temperature", BigDecimal.valueOf(temperature).setScale(2, RoundingMode.HALF_UP));  // 温度
+            data.put("humidity", BigDecimal.valueOf(humidity));         // 湿度
+            data.put("pm25", BigDecimal.valueOf(pm25));                 // PM2.5
+            data.put("aqi", aqi);                        // AQI
+            data.put("pir", pir);                         // 人体红外
+            data.put("trafficFlow", trafficFlow);         // 车流量
+            data.put("collectedAt", LocalDateTime.now().toString());    // 采集时间
 
             try {
                 String json = objectMapper.writeValueAsString(data);

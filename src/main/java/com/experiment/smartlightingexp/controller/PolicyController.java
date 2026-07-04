@@ -8,6 +8,9 @@ import com.experiment.smartlightingexp.dto.PolicyRequest;
 import com.experiment.smartlightingexp.entity.AuditLog;
 import com.experiment.smartlightingexp.entity.LightingPolicy;
 import com.experiment.smartlightingexp.mapper.AuditLogMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.experiment.smartlightingexp.entity.DecisionLog;
+import com.experiment.smartlightingexp.mapper.DecisionLogMapper;
 import com.experiment.smartlightingexp.service.LightingPolicyService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -21,8 +24,11 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 照明策略控制器 — 策略的增删改查与启停管理。
@@ -40,10 +46,11 @@ public class PolicyController {
 
     private final LightingPolicyService lightingPolicyService;
     private final AuditLogMapper auditLogMapper;
+    private final DecisionLogMapper decisionLogMapper;
     private final ObjectMapper objectMapper;
 
     /**
-     * 查询所有策略（未删除）。
+     * 查询所有策略（未删除），填充真实触发次数与最近触发时间。
      */
     @GetMapping
     public Result<List<LightingPolicy>> list() {
@@ -52,10 +59,39 @@ public class PolicyController {
                 .orderByAsc(LightingPolicy::getPriority)
                 .list();
         list.forEach(p -> {
-            p.setTriggerCount((int)(Math.random() * 100));
-            p.setLastTriggerTime(LocalDateTime.now().minusMinutes((long)(Math.random() * 60)));
+            LambdaQueryWrapper<DecisionLog> wrapper = new LambdaQueryWrapper<DecisionLog>()
+                    .eq(DecisionLog::getMatchedPolicy, p.getName())
+                    .eq(DecisionLog::getResult, "MATCH_EXECUTED");
+            p.setTriggerCount(decisionLogMapper.selectCount(wrapper).intValue());
+            DecisionLog latest = decisionLogMapper.selectOne(
+                    wrapper.orderByDesc(DecisionLog::getCreateTime).last("LIMIT 1"));
+            p.setLastTriggerTime(latest != null ? latest.getCreateTime() : null);
         });
         return Result.success(list);
+    }
+
+    /**
+     * 查询所有策略组（从 conditions JSON 中提取 group 字段去重）。
+     */
+    @GetMapping("/groups")
+    public Result<List<String>> groups() {
+        List<LightingPolicy> policies = lightingPolicyService.lambdaQuery()
+                .eq(LightingPolicy::getDeleted, false)
+                .list();
+        Set<String> groups = new LinkedHashSet<>();
+        for (LightingPolicy policy : policies) {
+            if (policy.getConditions() == null || policy.getConditions().isBlank()) continue;
+            try {
+                Map<String, Object> conds = objectMapper.readValue(policy.getConditions(),
+                        new TypeReference<LinkedHashMap<String, Object>>() {});
+                Object group = conds.get("group");
+                if (group != null && !group.toString().isBlank()) {
+                    groups.add(group.toString());
+                }
+            } catch (JsonProcessingException ignored) {
+            }
+        }
+        return Result.success(groups.stream().collect(Collectors.toList()));
     }
 
     /**
@@ -131,8 +167,13 @@ public class PolicyController {
         if (policy == null || Boolean.TRUE.equals(policy.getDeleted())) {
             return Result.error("策略不存在");
         }
-        policy.setTriggerCount((int)(Math.random() * 100));
-        policy.setLastTriggerTime(LocalDateTime.now().minusMinutes((long)(Math.random() * 60)));
+        LambdaQueryWrapper<DecisionLog> wrapper = new LambdaQueryWrapper<DecisionLog>()
+                .eq(DecisionLog::getMatchedPolicy, policy.getName())
+                .eq(DecisionLog::getResult, "MATCH_EXECUTED");
+        policy.setTriggerCount(decisionLogMapper.selectCount(wrapper).intValue());
+        DecisionLog latest = decisionLogMapper.selectOne(
+                wrapper.orderByDesc(DecisionLog::getCreateTime).last("LIMIT 1"));
+        policy.setLastTriggerTime(latest != null ? latest.getCreateTime() : null);
         return Result.success(policy);
     }
 
