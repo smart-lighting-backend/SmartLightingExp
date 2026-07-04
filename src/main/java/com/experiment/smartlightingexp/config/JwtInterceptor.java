@@ -2,6 +2,7 @@ package com.experiment.smartlightingexp.config;
 
 import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.SecurityContext;
+import com.experiment.smartlightingexp.mapper.PermissionMapper;
 import com.experiment.smartlightingexp.util.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -27,6 +28,7 @@ import java.util.List;
 public class JwtInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
+    private final PermissionMapper permissionMapper;
 
     /**
      * 白名单路径前缀 — 匹配开头即放行。
@@ -71,10 +73,10 @@ public class JwtInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        // 4. 解析用户信息并注入 SecurityContext
+        // 4. 从 Token 中解析基础信息，但权限从数据库动态查询（分配权限后即时生效）
         String username = jwtUtil.extractSubject(token);
         String roleCode = jwtUtil.extractRoleCode(token);
-        List<String> permissions = jwtUtil.extractPermissions(token);
+        List<String> permissions = permissionMapper.selectPermissionCodesByRoleCode(roleCode);
 
         SecurityContext.setCurrentUser(
                 new SecurityContext.UserInfo(username, roleCode, permissions));

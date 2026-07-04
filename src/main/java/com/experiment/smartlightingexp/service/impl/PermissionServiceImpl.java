@@ -22,4 +22,9 @@ public class PermissionServiceImpl extends ServiceImpl<PermissionMapper, Permiss
     public List<String> getPermissionCodesByRoleId(Long roleId) {
         return permissionMapper.selectPermissionCodesByRoleId(roleId);
     }
+
+    @Override
+    public List<String> getPermissionCodesByRoleCode(String roleCode) {
+        return permissionMapper.selectPermissionCodesByRoleCode(roleCode);
+    }
 }

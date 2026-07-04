@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.PermissionTreeNode;
@@ -32,6 +33,7 @@ public class PermissionController {
      * 获取权限树（用于前端权限分配树形选择器）。
      * 可选参数: roleId — 若传入，标记该角色已拥有的权限节点为 checked。
      */
+    @RequirePermission("permission:read")
     @GetMapping("/tree")
     public Result<List<PermissionTreeNode>> getTree(@RequestParam(required = false) Long roleId) {
         List<Permission> allPermissions = permissionService.list();
@@ -55,6 +57,7 @@ public class PermissionController {
     /**
      * 查询所有权限（扁平列表）。
      */
+    @RequirePermission("permission:read")
     @GetMapping
     public Result<List<Permission>> list() {
         return Result.success(permissionService.list());
@@ -63,6 +66,7 @@ public class PermissionController {
     /**
      * 查询单个权限。
      */
+    @RequirePermission("permission:read")
     @GetMapping("/{id}")
     public Result<Permission> getById(@PathVariable Long id) {
         Permission perm = permissionService.getById(id);
@@ -75,6 +79,7 @@ public class PermissionController {
     /**
      * 新增权限。
      */
+    @RequirePermission("permission:create")
     @PostMapping
     public Result<Void> create(@RequestBody Permission permission, HttpServletRequest request) {
         if (permission.getName() == null || permission.getName().isBlank()) {
@@ -93,6 +98,7 @@ public class PermissionController {
     /**
      * 修改权限。
      */
+    @RequirePermission("permission:update")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Permission permission,
                                HttpServletRequest request) {
@@ -119,6 +125,7 @@ public class PermissionController {
     /**
      * 删除权限。
      */
+    @RequirePermission("permission:delete")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id, HttpServletRequest request) {
         Permission existing = permissionService.getById(id);
