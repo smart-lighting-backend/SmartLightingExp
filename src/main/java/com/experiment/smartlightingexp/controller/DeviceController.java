@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.DeviceQueryRequest;
@@ -146,6 +147,7 @@ public class DeviceController {
      * 新增设备。
      */
     @PostMapping
+    @RequirePermission("device:create")
     public Result<Device> create(@RequestBody Device device,
                                  HttpServletRequest httpRequest) {
         if (device.getDeviceId() == null || device.getDeviceId().isBlank()) {
@@ -177,6 +179,7 @@ public class DeviceController {
      * 更新设备信息。
      */
     @PutMapping("/{deviceId}")
+    @RequirePermission("device:update")
     public Result<Device> update(@PathVariable String deviceId,
                                  @RequestBody Device device,
                                  HttpServletRequest httpRequest) {
@@ -218,6 +221,7 @@ public class DeviceController {
      * 删除设备（软删除）。
      */
     @DeleteMapping("/{deviceId}")
+    @RequirePermission("device:delete")
     public Result<Void> delete(@PathVariable String deviceId,
                                HttpServletRequest httpRequest) {
         Device existing = deviceService.lambdaQuery()

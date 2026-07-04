@@ -3,11 +3,13 @@ package com.experiment.smartlightingexp.controller;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.dto.LoginRequest;
 import com.experiment.smartlightingexp.dto.LoginResponse;
+import com.experiment.smartlightingexp.dto.MenuTreeNode;
 import com.experiment.smartlightingexp.entity.Role;
 import com.experiment.smartlightingexp.entity.User;
 import com.experiment.smartlightingexp.mapper.RoleMapper;
 import com.experiment.smartlightingexp.mapper.UserMapper;
 import com.experiment.smartlightingexp.service.AuditLogService;
+import com.experiment.smartlightingexp.service.MenuService;
 import com.experiment.smartlightingexp.service.PermissionService;
 import com.experiment.smartlightingexp.service.UserService;
 import com.experiment.smartlightingexp.util.JwtUtil;
@@ -34,6 +36,7 @@ public class AuthController {
     private final UserMapper userMapper;
     private final RoleMapper roleMapper;
     private final PermissionService permissionService;
+    private final MenuService menuService;
     private final AuditLogService auditLogService;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
@@ -73,7 +76,10 @@ public class AuthController {
 
         List<String> permissions = permissionService.getPermissionCodesByRoleId(user.getRoleId());
 
-        // 4. 签发 JWT
+        // 4. 查询可见菜单
+        List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
+
+        // 5. 签发 JWT
         String token = jwtUtil.generateToken(user.getUsername(), role.getRoleCode(), permissions);
 
         log.info("[登录成功] username={}, role={}, permissions={}",
@@ -89,11 +95,12 @@ public class AuthController {
         auditLog(user.getUsername(), "LOGIN", "SYSTEM", null,
                 "登录成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
-        return Result.success(new LoginResponse(token, user.getUsername(), role.getRoleCode()));
+        return Result.success(new LoginResponse(token, user.getUsername(), role.getRoleCode(), permissions, menus));
     }
 
     /**
      * 获取当前用户信息（用于前端校验 Token 是否有效）。
+     * 返回 Token、用户名、角色、权限列表、可见菜单树。
      */
     @GetMapping("/me")
     public Result<LoginResponse> me(@RequestHeader("Authorization") String authHeader) {
@@ -106,8 +113,10 @@ public class AuthController {
         }
         String username = jwtUtil.extractSubject(token);
         String roleCode = jwtUtil.extractRoleCode(token);
+        List<String> permissions = jwtUtil.extractPermissions(token);
+        List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
 
-        return Result.success(new LoginResponse(token, username, roleCode));
+        return Result.success(new LoginResponse(token, username, roleCode, permissions, menus));
     }
 
     /**

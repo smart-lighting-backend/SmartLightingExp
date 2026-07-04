@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.LuxThresholdRequest;
@@ -162,6 +163,7 @@ public class PolicyController {
     /**
      * 更新策略。
      */
+    @RequirePermission("policy:update")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id,
                                @Valid @RequestBody PolicyRequest request,
@@ -212,6 +214,7 @@ public class PolicyController {
     /**
      * 启用/禁用策略。
      */
+    @RequirePermission("policy:update")
     @PutMapping("/{id}/toggle")
     public Result<Void> toggle(@PathVariable Long id,
                                HttpServletRequest httpRequest) {

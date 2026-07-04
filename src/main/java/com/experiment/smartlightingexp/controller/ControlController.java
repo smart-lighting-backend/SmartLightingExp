@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.ControlRequest;
@@ -51,6 +52,7 @@ public class ControlController {
      * 手动控制设备（开/关/调光）。
      * 记录手动操作时间 → AI 策略引擎在 30 分钟内跳过此设备。
      */
+    @RequirePermission("device:create")
     @PostMapping("/{deviceId}/control")
     public Result<Void> control(@PathVariable String deviceId,
                                 @Valid @RequestBody ControlRequest request,

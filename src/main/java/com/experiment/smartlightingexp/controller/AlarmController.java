@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.AlarmQueryRequest;
@@ -98,6 +99,7 @@ public class AlarmController {
     /**
      * 更新告警（修改状态、处理人、恢复时间等）。
      */
+    @RequirePermission("alarm:handle")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id,
                                @RequestBody AlarmRecord alarm,
@@ -149,6 +151,7 @@ public class AlarmController {
     /**
      * 处理/确认告警：设置处理人、恢复时间和备注。
      */
+    @RequirePermission("alarm:handle")
     @PutMapping("/{id}/handle")
     public Result<Void> handle(@PathVariable Long id,
                                @RequestBody Map<String, String> body,
@@ -179,6 +182,7 @@ public class AlarmController {
     /**
      * 批量处理/确认告警。
      */
+    @RequirePermission("alarm:handle")
     @PutMapping("/batch/handle")
     public Result<Void> batchHandle(@RequestBody Map<String, Object> body,
                                     HttpServletRequest httpRequest) {
@@ -210,6 +214,7 @@ public class AlarmController {
     /**
      * 批量删除告警。
      */
+    @RequirePermission("alarm:delete")
     @DeleteMapping("/batch")
     public Result<Void> batchDelete(@RequestBody Map<String, Object> body,
                                     HttpServletRequest httpRequest) {
