@@ -2,7 +2,9 @@ package com.experiment.smartlightingexp.task;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.experiment.smartlightingexp.config.MqttProperties;
+import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
+import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mqtt.MqttPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +32,7 @@ public class MockDataGenerator {
     private final MqttPublisher mqttPublisher;
     private final ObjectMapper objectMapper;
     private final MqttProperties mqttProperties;
+    private final ControlCommandMapper controlCommandMapper;
 
     private final Random random = new Random();
 
@@ -88,5 +91,38 @@ public class MockDataGenerator {
         }
         log.info("Result: {}/{} published", successCount, devices.size());
         log.info("================================");
+
+        simulateAcks(devices);
+    }
+
+    /** 模拟设备回复 ACK：查询最近 10 分钟内无确认的指令，以 90% 概率确认。 */
+    private void simulateAcks(List<Device> devices) {
+        int ackCount = 0;
+        for (Device device : devices) {
+            List<ControlCommand> pending = controlCommandMapper.selectList(
+                    new LambdaQueryWrapper<ControlCommand>()
+                            .eq(ControlCommand::getDeviceId, device.getDeviceId())
+                            .isNull(ControlCommand::getAckAt)
+                            .ge(ControlCommand::getIssuedAt, LocalDateTime.now().minusMinutes(10)));
+            for (ControlCommand cmd : pending) {
+                if (random.nextDouble() < 0.9) {
+                    try {
+                        Map<String, Object> ack = new HashMap<>();
+                        ack.put("commandId", cmd.getId());
+                        ack.put("status", "EXECUTED");
+                        ack.put("completedAt", LocalDateTime.now().toString());
+                        String json = objectMapper.writeValueAsString(ack);
+                        String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/command/ack";
+                        mqttPublisher.publish(topic, json, 1);
+                        ackCount++;
+                    } catch (Exception e) {
+                        log.error("  [{}] ✗ ACK publish failed: {}", device.getDeviceId(), e.getMessage());
+                    }
+                }
+            }
+        }
+        if (ackCount > 0) {
+            log.info("ACK simulation: {} commands acknowledged", ackCount);
+        }
     }
 }

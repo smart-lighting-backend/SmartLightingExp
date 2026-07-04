@@ -6,17 +6,22 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.DeviceQueryRequest;
-import com.experiment.smartlightingexp.entity.Device;
-import com.experiment.smartlightingexp.entity.AuditLog;
-import com.experiment.smartlightingexp.mapper.AuditLogMapper;
+import com.experiment.smartlightingexp.entity.*;
+import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.service.DeviceService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.*;
+import java.util.*;
 
 /**
  * 设备管理控制器 — 设备增删改查 + 组合条件分页查询。
@@ -274,5 +279,170 @@ public class DeviceController {
             ip = ip.split(",")[0].trim();
         }
         return ip;
+    }
+
+    // ───────────── 健康评分 API ─────────────
+
+    private final AlarmRecordMapper alarmRecordMapper;
+    private final TelemetryMapper telemetryMapper;
+    private final ControlCommandMapper controlCommandMapper;
+    private final ObjectMapper objectMapper;
+
+    @GetMapping("/{deviceId}/health")
+    public Result<Map<String, Object>> getHealth(@PathVariable String deviceId) {
+        Device device = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId).eq(Device::getDeleted, false).one();
+        if (device == null) return Result.error("设备不存在");
+
+        int offline = calcOffline(deviceId);
+        int comm = calcComm(deviceId);
+        int response = calcResponse(deviceId);
+        int sensor = calcSensor(device);
+        int total = (int) Math.round(0.30 * offline + 0.25 * comm + 0.25 * response + 0.20 * sensor);
+
+        String level;
+        String color;
+        if (total >= 90) { level = "优秀"; color = "#4caf50"; }
+        else if (total >= 70) { level = "良好"; color = "#ff9800"; }
+        else if (total >= 50) { level = "一般"; color = "#ff9800"; }
+        else if (total >= 30) { level = "较差"; color = "#f44336"; }
+        else { level = "危险"; color = "#f44336"; }
+
+        List<Map<String, Object>> dimensions = new ArrayList<>();
+        dimensions.add(dimItem("离线频次", offline, "30%", offline == 100 ? null : "近7天离线次数较多"));
+        dimensions.add(dimItem("通信质量", comm, "25%", comm == 100 ? null : "遥测上报间隔波动较大"));
+        dimensions.add(dimItem("指令响应率", response, "25%", response == 100 ? null : "部分指令未收到设备确认"));
+        dimensions.add(dimItem("传感器状态", sensor, "20%", sensor == 100 ? null : "部分传感器读数异常或为空"));
+
+        String suggestion = total >= 90 ? "设备状态极佳" :
+                total >= 70 ? "设备总体健康，建议定期巡检" :
+                total >= 50 ? "关注设备运行状况，建议安排检查" :
+                "设备健康度较低，建议尽快安排维修";
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", deviceId);
+        result.put("deviceName", device.getName());
+        result.put("overallScore", total);
+        result.put("level", level);
+        result.put("levelColor", color);
+        result.put("dimensions", dimensions);
+        result.put("suggestion", suggestion);
+        result.put("evaluatedAt", LocalDateTime.now().toString());
+        return Result.success(result);
+    }
+
+    @GetMapping("/health/summary")
+    public Result<Map<String, Object>> healthSummary() {
+        List<Device> devices = deviceService.lambdaQuery()
+                .eq(Device::getEnabled, true).eq(Device::getDeleted, false).list();
+        List<Map<String, Object>> list = new ArrayList<>();
+        int healthy = 0, warning = 0, critical = 0;
+        double sum = 0;
+        for (Device d : devices) {
+            int s = d.getHealthScore() != null ? d.getHealthScore().intValue() : 0;
+            sum += s;
+            if (s >= 90) healthy++;
+            else if (s >= 70) healthy++;
+            else if (s >= 50) warning++;
+            else critical++;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("deviceId", d.getDeviceId());
+            item.put("name", d.getName());
+            item.put("score", s);
+            item.put("level", s >= 90 ? "优秀" : s >= 70 ? "良好" : s >= 50 ? "一般" : s >= 30 ? "较差" : "危险");
+            list.add(item);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalDevices", devices.size());
+        result.put("healthyCount", healthy);
+        result.put("warningCount", warning);
+        result.put("criticalCount", critical);
+        result.put("averageScore", devices.isEmpty() ? 0 : Math.round(sum / devices.size()));
+        result.put("list", list);
+        return Result.success(result);
+    }
+
+    private Map<String, Object> dimItem(String name, int score, String weight, String reason) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", name);
+        m.put("score", score);
+        m.put("weight", weight);
+        m.put("reason", reason);
+        return m;
+    }
+
+    private int calcOffline(String deviceId) {
+        long count = alarmRecordMapper.selectCount(
+                new LambdaQueryWrapper<AlarmRecord>()
+                        .eq(AlarmRecord::getDeviceId, deviceId)
+                        .eq(AlarmRecord::getType, "OFFLINE")
+                        .ge(AlarmRecord::getStartAt, LocalDateTime.now().minusDays(7)));
+        if (count == 0) return 100;
+        if (count == 1) return 80;
+        if (count == 2) return 60;
+        if (count == 3) return 40;
+        return 20;
+    }
+
+    private int calcComm(String deviceId) {
+        List<Telemetry> list = telemetryMapper.selectList(
+                new LambdaQueryWrapper<Telemetry>()
+                        .eq(Telemetry::getDeviceId, deviceId)
+                        .ge(Telemetry::getCreateTime, LocalDateTime.now().minusHours(24))
+                        .orderByAsc(Telemetry::getCreateTime));
+        if (list.size() < 3) return 0;
+        List<Double> gaps = new ArrayList<>();
+        for (int i = 1; i < list.size(); i++) {
+            Duration d = Duration.between(list.get(i - 1).getCreateTime(), list.get(i).getCreateTime());
+            gaps.add((double) Math.abs(d.getSeconds() - 300));
+        }
+        double avg = gaps.stream().mapToDouble(Double::doubleValue).average().orElse(999);
+        if (avg < 30) return 100;
+        if (avg < 60) return 80;
+        if (avg < 120) return 60;
+        return 40;
+    }
+
+    private int calcResponse(String deviceId) {
+        List<ControlCommand> all = controlCommandMapper.selectList(
+                new LambdaQueryWrapper<ControlCommand>()
+                        .eq(ControlCommand::getDeviceId, deviceId)
+                        .ge(ControlCommand::getIssuedAt, LocalDateTime.now().minusDays(7)));
+        if (all.isEmpty()) return 100;
+        long acked = all.stream().filter(c -> c.getAckAt() != null).count();
+        double rate = (double) acked / all.size();
+        if (rate >= 1.0) return 100;
+        if (rate >= 0.8) return 80;
+        if (rate >= 0.5) return 60;
+        return 30;
+    }
+
+    private int calcSensor(Device device) {
+        if (device.getLatestData() == null || device.getLatestData().isBlank()) return 0;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = objectMapper.readValue(device.getLatestData(), Map.class);
+            int abnormal = 0, total = 0;
+            abnormal += chk(data, "illuminance", 0, 2000); total++;
+            abnormal += chk(data, "temperature", -10, 50); total++;
+            abnormal += chk(data, "humidity", 0, 100);     total++;
+            abnormal += chk(data, "pm25", 0, 500);         total++;
+            abnormal += chk(data, "aqi", 0, 500);          total++;
+            if (total == 0) return 100;
+            double ratio = (double) abnormal / total;
+            if (ratio == 0) return 100;
+            if (ratio <= 0.2) return 70;
+            if (ratio <= 0.5) return 40;
+            return 10;
+        } catch (Exception e) { return 0; }
+    }
+
+    private int chk(Map<String, Object> data, String key, double min, double max) {
+        Object val = data.get(key);
+        if (val == null) return 1;
+        try {
+            double d = Double.parseDouble(val.toString());
+            return (d >= min && d <= max) ? 0 : 1;
+        } catch (NumberFormatException e) { return 1; }
     }
 }

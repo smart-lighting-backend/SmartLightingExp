@@ -1,8 +1,10 @@
 package com.experiment.smartlightingexp.mqtt;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
+import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.TelemetryMapper;
 import com.experiment.smartlightingexp.engine.DecisionEngine;
@@ -10,6 +12,7 @@ import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -27,6 +30,7 @@ public class MqttSubscriber {
     private final TelemetryMapper telemetryMapper;
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
+    private final ControlCommandMapper controlCommandMapper;
     private final DecisionEngine decisionEngine;
     private final AlarmRecordService alarmRecordService;
 
@@ -42,9 +46,30 @@ public class MqttSubscriber {
             public void messageArrived(String topic, org.eclipse.paho.client.mqttv3.MqttMessage message) {
                 try {
                     String json = new String(message.getPayload());
+                    String deviceId = topic.split("/")[1];
+
+                    // command/ack 路由：设备回复指令确认
+                    if (topic.endsWith("/command/ack")) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> ack = objectMapper.readValue(json, Map.class);
+                        Object cmdIdObj = ack.get("commandId");
+                        Long commandId = cmdIdObj != null ? Long.valueOf(cmdIdObj.toString()) : null;
+                        if (commandId != null) {
+                            ControlCommand cmd = controlCommandMapper.selectById(commandId);
+                            if (cmd != null && cmd.getAckAt() == null) {
+                                String ackStatus = ack.get("status") != null ? ack.get("status").toString() : "ACKED";
+                                cmd.setStatus(ackStatus);
+                                cmd.setAckAt(LocalDateTime.now());
+                                controlCommandMapper.updateById(cmd);
+                                log.info("  [{}] ✅ ACK received: cmdId={}, status={}", deviceId, commandId, ackStatus);
+                            }
+                        }
+                        return;
+                    }
+
+                    // telemetry topic
                     Telemetry telemetry = objectMapper.readValue(json, Telemetry.class);
                     telemetryMapper.insert(telemetry);
-                    String deviceId = topic.split("/")[1];
                     LocalDateTime now = LocalDateTime.now();
 
                     // 检查设备是否处于手动控制模式
@@ -99,7 +124,8 @@ public class MqttSubscriber {
 
         try {
             mqttClient.subscribe("streetlight/+/telemetry", 1);
-            log.info("MQTT subscriber ready, topic=streetlight/+/telemetry");
+            mqttClient.subscribe("streetlight/+/command/ack", 1);
+            log.info("MQTT subscriber ready, topics=telemetry,command/ack");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
         }
