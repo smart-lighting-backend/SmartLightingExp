@@ -16,7 +16,9 @@ public class MqttConfig {
 
     @Bean(destroyMethod = "disconnect")
     public MqttClient mqttClient(MqttProperties props) throws MqttException {
-        MqttClient client = new MqttClient(props.getBroker(), props.getClientId(), new MemoryPersistence());
+        String uniqueClientId = props.getClientId() + "-" + System.currentTimeMillis();
+        log.info("MQTT clientId={}", uniqueClientId);
+        MqttClient client = new MqttClient(props.getBroker(), uniqueClientId, new MemoryPersistence());
 
         MqttConnectOptions options = new MqttConnectOptions();
         options.setAutomaticReconnect(true);

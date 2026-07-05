@@ -112,6 +112,37 @@ public class MockDataGenerator {
         simulateAcks(devices);
     }
 
+    /**
+     * 心跳模拟 — 启动 10s 后首次执行，之后每 30 秒一次。
+     * 为每台已启用设备发布轻量心跳消息到 streetlight/{deviceId}/heartbeat，
+     * MqttSubscriber 收到后仅更新 lastHeartbeatAt 和在线状态，不触发决策引擎。
+     */
+    @Scheduled(initialDelay = 10000, fixedRate = 30000)
+    public void generateHeartbeats() {
+        LambdaQueryWrapper<Device> query = new LambdaQueryWrapper<Device>()
+                .eq(Device::getEnabled, true)
+                .eq(Device::getDeleted, false);
+        List<Device> devices = deviceMapper.selectList(query);
+        if (devices.isEmpty()) return;
+
+        LocalDateTime now = LocalDateTime.now();
+        int count = 0;
+        for (Device device : devices) {
+            try {
+                Map<String, Object> hb = new HashMap<>();
+                hb.put("deviceId", device.getDeviceId());
+                hb.put("timestamp", now.toString());
+                String json = objectMapper.writeValueAsString(hb);
+                String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/heartbeat";
+                mqttPublisher.publish(topic, json, 1);
+                count++;
+            } catch (Exception e) {
+                log.error("  [{}] ✗ heartbeat publish failed: {}", device.getDeviceId(), e.getMessage());
+            }
+        }
+        log.debug("Heartbeat simulation: {}/{} devices", count, devices.size());
+    }
+
     /** 模拟设备回复 ACK：查询最近 10 分钟内无确认的指令，以 90% 概率确认。 */
     private void simulateAcks(List<Device> devices) {
         int ackCount = 0;

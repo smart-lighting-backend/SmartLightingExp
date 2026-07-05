@@ -70,6 +70,20 @@ public class MqttSubscriber {
                         alarmRecordService.resolveOfflineAlarm(deviceId);
                         return;
                     }
+                    // 心跳
+                    if (topic.endsWith("/heartbeat")) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> hb = objectMapper.readValue(json, Map.class);
+                        String hbDeviceId = hb.get("deviceId") != null ? hb.get("deviceId").toString() : deviceId;
+                        LocalDateTime hbNow = LocalDateTime.now();
+                        deviceMapper.update(null,
+                                Wrappers.<Device>lambdaUpdate()
+                                        .eq(Device::getDeviceId, hbDeviceId)
+                                        .set(Device::getLastHeartbeatAt, hbNow)
+                                        .set(Device::getStatus, 1));
+                        alarmRecordService.resolveOfflineAlarm(hbDeviceId);
+                        return;
+                    }
                     // 指令确认 ACK
                     if (topic.endsWith("/command/ack")) {
                         @SuppressWarnings("unchecked")
@@ -140,11 +154,12 @@ public class MqttSubscriber {
         });
 
         try {
+            mqttClient.subscribe("streetlight/+/heartbeat", 1);
             mqttClient.subscribe("streetlight/+/telemetry", 1);
             mqttClient.subscribe("streetlight/+/vision/event", 1);
             mqttClient.subscribe("streetlight/+/voice/event", 1);
             mqttClient.subscribe("streetlight/+/command/ack", 1);
-            log.info("MQTT subscriber ready, topics=telemetry,vision/event,voice/event,command/ack");
+            log.info("MQTT subscriber ready, topics=heartbeat,telemetry,vision/event,voice/event,command/ack");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
         }
