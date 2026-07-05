@@ -11,12 +11,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Slf4j
 @RestController
@@ -41,6 +39,16 @@ public class AssistantController {
                     httpRequest);
         }
         return Result.success(response);
+    }
+
+    @PostMapping("/diagnose")
+    public Result<AssistantChatResponse> diagnose(@RequestBody Map<String, String> body) {
+        String deviceId = body.get("deviceId");
+        if (deviceId == null || deviceId.isBlank()) {
+            return Result.error("deviceId 不能为空");
+        }
+        String question = body.getOrDefault("question", "");
+        return Result.success(assistantService.diagnose(deviceId, question));
     }
 
     private void saveAuditLog(String action, String targetType, String targetId,
