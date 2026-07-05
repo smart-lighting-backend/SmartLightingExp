@@ -235,10 +235,15 @@ public class DeviceController {
             return Result.error("设备不存在");
         }
 
-        existing.setDeleted(true);
         existing.setEnabled(false);
         existing.setStatus(0);
         deviceService.updateById(existing);
+        boolean removed = deviceService.removeById(existing.getId());
+        if (!removed) {
+            saveAuditLog("DEVICE_DELETE", "DEVICE", deviceId,
+                    "设备删除失败", "FAIL", httpRequest);
+            return Result.error(500, "设备删除失败");
+        }
 
         saveAuditLog("DEVICE_DELETE", "DEVICE", deviceId,
                 "删除设备-" + existing.getName(), "SUCCESS", httpRequest);

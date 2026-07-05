@@ -99,9 +99,9 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
         Device existing = getActiveDevice(deviceId);
         update(new LambdaUpdateWrapper<Device>()
                 .eq(Device::getId, existing.getId())
-                .set(Device::getDeleted, true)
                 .set(Device::getEnabled, false)
                 .set(Device::getStatus, DEVICE_STATUS_DISABLED));
+        removeById(existing.getId());
     }
 
     @Override
