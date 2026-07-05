@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.AssistantChatRequest;
@@ -25,6 +26,7 @@ public class AssistantController {
     private final AssistantService assistantService;
     private final AuditLogService auditLogService;
 
+    @RequirePermission("assistant:read")
     @PostMapping("/chat")
     public Result<AssistantChatResponse> chat(@Valid @RequestBody AssistantChatRequest request,
                                               HttpServletRequest httpRequest) {
@@ -41,6 +43,7 @@ public class AssistantController {
         return Result.success(response);
     }
 
+    @RequirePermission("assistant:read")
     @PostMapping("/diagnose")
     public Result<AssistantChatResponse> diagnose(@RequestBody Map<String, String> body) {
         String deviceId = body.get("deviceId");

@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.UserQueryRequest;
@@ -41,6 +42,7 @@ public class UserController {
      * 组合条件分页查询用户列表。
      * 支持按 roleId、username、realName、phone、department 等筛选。
      */
+    @RequirePermission("user:read")
     @PostMapping("/list")
     public Result<IPage<Map<String, Object>>> list(@RequestBody UserQueryRequest request) {
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
@@ -123,6 +125,7 @@ public class UserController {
     /**
      * 查询单个用户详情。
      */
+    @RequirePermission("user:read")
     @GetMapping("/{id}")
     public Result<Map<String, Object>> getById(@PathVariable Long id) {
         User user = userService.lambdaQuery()
@@ -162,6 +165,7 @@ public class UserController {
     /**
      * 新增用户。
      */
+    @RequirePermission("user:create")
     @PostMapping
     public Result<Void> create(@RequestBody User user,
                                HttpServletRequest httpRequest) {
@@ -191,6 +195,7 @@ public class UserController {
     /**
      * 更新用户信息。
      */
+    @RequirePermission("user:update")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id,
                                @RequestBody User user,
@@ -227,6 +232,7 @@ public class UserController {
     /**
      * 删除用户。
      */
+    @RequirePermission("user:delete")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id,
                                HttpServletRequest httpRequest) {
@@ -253,6 +259,7 @@ public class UserController {
     /**
      * 获取所有角色列表（供前端下拉选择）。
      */
+    @RequirePermission("user:read")
     @GetMapping("/roles")
     public Result<List<Role>> getAllRoles() {
         List<Role> roles = roleMapper.selectList(null);

@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.AlarmQueryRequest;
@@ -40,6 +41,7 @@ public class AlarmController {
     /**
      * 组合条件查询告警列表（分页）。
      */
+    @RequirePermission("alarm:read")
     @PostMapping("/list")
     public Result<IPage<AlarmRecord>> list(@RequestBody AlarmQueryRequest request) {
         LambdaQueryWrapper<AlarmRecord> wrapper = buildQueryWrapper(request);
@@ -55,6 +57,7 @@ public class AlarmController {
     /**
      * 查询单条告警详情。
      */
+    @RequirePermission("alarm:read")
     @GetMapping("/{id}")
     public Result<AlarmRecord> getById(@PathVariable Long id) {
         AlarmRecord record = alarmRecordService.getById(id);
@@ -69,6 +72,7 @@ public class AlarmController {
     /**
      * 新增告警（手动创建）。
      */
+    @RequirePermission("alarm:read")
     @PostMapping
     public Result<Void> create(@RequestBody AlarmRecord alarm,
                                HttpServletRequest httpRequest) {
@@ -97,6 +101,7 @@ public class AlarmController {
     /**
      * 更新告警（修改状态、处理人、恢复时间等）。
      */
+    @RequirePermission("alarm:read")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id,
                                @RequestBody AlarmRecord alarm,
@@ -126,6 +131,7 @@ public class AlarmController {
     /**
      * 删除单条告警。
      */
+    @RequirePermission("alarm:delete")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id,
                                HttpServletRequest httpRequest) {
@@ -148,6 +154,7 @@ public class AlarmController {
     /**
      * 处理/确认告警：设置处理人、恢复时间和备注。
      */
+    @RequirePermission("alarm:read")
     @PutMapping("/{id}/handle")
     public Result<Void> handle(@PathVariable Long id,
                                @RequestBody Map<String, String> body,
@@ -178,6 +185,7 @@ public class AlarmController {
     /**
      * 批量处理/确认告警。
      */
+    @RequirePermission("alarm:read")
     @PutMapping("/batch/handle")
     public Result<Void> batchHandle(@RequestBody Map<String, Object> body,
                                     HttpServletRequest httpRequest) {
@@ -209,6 +217,7 @@ public class AlarmController {
     /**
      * 批量删除告警。
      */
+    @RequirePermission("alarm:delete")
     @DeleteMapping("/batch")
     public Result<Void> batchDelete(@RequestBody Map<String, Object> body,
                                     HttpServletRequest httpRequest) {
@@ -234,6 +243,7 @@ public class AlarmController {
      * 告警统计：按级别、类型、状态分别统计数量。
      * 用于大屏展示（满足 IR-08 数字孪生可视化大屏）。
      */
+    @RequirePermission("alarm:read")
     @GetMapping("/stats")
     public Result<Map<String, Object>> stats() {
         // 按级别统计（ACTIVE）
@@ -270,6 +280,7 @@ public class AlarmController {
      *
      * @param days 最近 N 天，默认 7 天
      */
+    @RequirePermission("alarm:read")
     @GetMapping("/trend")
     public Result<List<Map<String, Object>>> trend(
             @RequestParam(defaultValue = "7") int days) {

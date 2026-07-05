@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.ControlRequest;
@@ -51,6 +52,7 @@ public class ControlController {
      * 手动控制设备（开/关/调光）。
      * 记录手动操作时间 → AI 策略引擎在 30 分钟内跳过此设备。
      */
+    @RequirePermission("device:control")
     @PostMapping("/{deviceId}/control")
     public Result<Void> control(@PathVariable String deviceId,
                                 @Valid @RequestBody ControlRequest request,
@@ -131,6 +133,7 @@ public class ControlController {
      * 查询设备控制历史（分页）。
      * 复用 control_command 表，按下发时间倒序排列。
      */
+    @RequirePermission("device:read")
     @GetMapping("/{deviceId}/control-history")
     public Result<Page<ControlCommand>> controlHistory(
             @PathVariable String deviceId,
@@ -148,6 +151,7 @@ public class ControlController {
      * 解除设备手动锁定，恢复自动控制。
      * DELETE /api/devices/{deviceId}/manual-lock
      */
+    @RequirePermission("device:control")
     @DeleteMapping("/{deviceId}/manual-lock")
     public Result<Void> unlockDevice(@PathVariable String deviceId,
                                      HttpServletRequest httpRequest) {

@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.DeviceQueryRequest;
@@ -39,6 +40,7 @@ public class DeviceController {
     /**
      * 组合条件分页查询设备列表。
      */
+    @RequirePermission("device:read")
     @PostMapping("/list")
     public Result<IPage<Device>> list(@RequestBody DeviceQueryRequest request) {
         LambdaQueryWrapper<Device> wrapper = new LambdaQueryWrapper<>();
@@ -87,6 +89,7 @@ public class DeviceController {
      * 分页查询设备列表（GET 方式，URL 查询参数）。
      * 支持关键词搜索（匹配 deviceId / name / location）+ 区域 / 状态 / 启用状态筛选。
      */
+    @RequirePermission("device:read")
     @GetMapping("/page")
     public Result<IPage<Device>> page(
             @RequestParam(defaultValue = "1") long pageNum,
@@ -135,6 +138,7 @@ public class DeviceController {
     /**
      * 查询单个设备详情。
      */
+    @RequirePermission("device:read")
     @GetMapping("/{deviceId}")
     public Result<Device> getByDeviceId(@PathVariable String deviceId) {
         Device device = deviceService.lambdaQuery()
@@ -150,6 +154,7 @@ public class DeviceController {
     /**
      * 新增设备。
      */
+    @RequirePermission("device:create")
     @PostMapping
     public Result<Device> create(@RequestBody Device device,
                                  HttpServletRequest httpRequest) {
@@ -181,6 +186,7 @@ public class DeviceController {
     /**
      * 更新设备信息。
      */
+    @RequirePermission("device:update")
     @PutMapping("/{deviceId}")
     public Result<Device> update(@PathVariable String deviceId,
                                  @RequestBody Device device,
@@ -222,6 +228,7 @@ public class DeviceController {
     /**
      * 删除设备（软删除）。
      */
+    @RequirePermission("device:delete")
     @DeleteMapping("/{deviceId}")
     public Result<Void> delete(@PathVariable String deviceId,
                                HttpServletRequest httpRequest) {
@@ -296,6 +303,7 @@ public class DeviceController {
     private final AlarmRecordService alarmRecordService;
     private final ObjectMapper objectMapper;
 
+    @RequirePermission("device:read")
     @GetMapping("/{deviceId}/health")
     public Result<Map<String, Object>> getHealth(@PathVariable String deviceId) {
         Device device = deviceService.lambdaQuery()
@@ -342,6 +350,7 @@ public class DeviceController {
         return Result.success(result);
     }
 
+    @RequirePermission("device:read")
     @GetMapping("/health/summary")
     public Result<Map<String, Object>> healthSummary() {
         List<Device> devices = deviceService.lambdaQuery()
@@ -458,6 +467,7 @@ public class DeviceController {
     }
 
     /** 融合感知面板：聚合遥测 + 视觉 + 语音 + 告警 + 健康分 */
+    @RequirePermission("device:read")
     @GetMapping("/{deviceId}/perception")
     public Result<Map<String, Object>> perception(@PathVariable String deviceId) {
         Device device = deviceService.lambdaQuery()

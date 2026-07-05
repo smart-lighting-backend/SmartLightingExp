@@ -1,13 +1,17 @@
 package com.experiment.smartlightingexp.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.EnergyRecord;
+import com.experiment.smartlightingexp.entity.DecisionLog;
 import com.experiment.smartlightingexp.mapper.AlarmRecordMapper;
+import com.experiment.smartlightingexp.mapper.DecisionLogMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.EnergyRecordMapper;
+import com.experiment.smartlightingexp.task.EdgeNodeSimulator;
 import com.experiment.smartlightingexp.task.EnergyCalcTask;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,13 +37,16 @@ public class DashboardController {
 
     private final DeviceMapper deviceMapper;
     private final AlarmRecordMapper alarmRecordMapper;
+    private final DecisionLogMapper decisionLogMapper;
     private final EnergyRecordMapper energyRecordMapper;
+    private final EdgeNodeSimulator edgeNodeSimulator;
     private final EnergyCalcTask energyCalcTask;
 
     /**
      * 仪表盘统计概览。
      * GET /api/dashboard/stats
      */
+    @RequirePermission("dashboard:read")
     @GetMapping("/stats")
     public Result<Map<String, Object>> stats() {
         long totalDevices = deviceMapper.selectCount(
@@ -96,6 +103,7 @@ public class DashboardController {
      * 能耗趋势（今日 vs 上周同期）。
      * GET /api/dashboard/energy-trend
      */
+    @RequirePermission("dashboard:read")
     @GetMapping("/energy-trend")
     public Result<Map<String, Object>> energyTrend() {
         // 生成 24 小时标签
@@ -154,6 +162,7 @@ public class DashboardController {
      * 分区设备状态。
      * GET /api/dashboard/districts
      */
+    @RequirePermission("dashboard:read")
     @GetMapping("/districts")
     public Result<List<Map<String, Object>>> districts() {
         // 查询所有未删除设备
@@ -194,6 +203,7 @@ public class DashboardController {
      * 手动触发当日能耗计算（保留原有 23:55 自动执行）。
      * POST /api/dashboard/energy/calc
      */
+    @RequirePermission("dashboard:read")
     @PostMapping("/energy/calc")
     public Result<Map<String, Object>> triggerEnergyCalc() {
         energyCalcTask.calcDailyEnergy();
@@ -207,6 +217,7 @@ public class DashboardController {
      * 生成历史能耗测试数据（过去 N 天，默认 30 天）。
      * POST /api/dashboard/energy/gen-test-data?days=30
      */
+    @RequirePermission("dashboard:read")
     @PostMapping("/energy/gen-test-data")
     public Result<Map<String, Object>> genTestData(@RequestParam(defaultValue = "30") int days) {
         if (days < 1 || days > 365) {
@@ -223,6 +234,7 @@ public class DashboardController {
      * 年度能耗统计（含去年同比）。
      * GET /api/dashboard/energy/yearly-stats?year=2026
      */
+    @RequirePermission("dashboard:read")
     @GetMapping("/energy/yearly-stats")
     public Result<Map<String, Object>> yearlyStats(@RequestParam(required = false) Integer year) {
         int targetYear = year != null ? year : Year.now().getValue();
@@ -293,6 +305,7 @@ public class DashboardController {
      * 月度能耗统计（12 个月）。
      * GET /api/dashboard/energy/monthly?year=2026
      */
+    @RequirePermission("dashboard:read")
     @GetMapping("/energy/monthly")
     public Result<Map<String, Object>> monthlyStats(@RequestParam(required = false) Integer year) {
         int targetYear = year != null ? year : Year.now().getValue();
@@ -348,6 +361,7 @@ public class DashboardController {
      * 分区能耗占比。
      * GET /api/dashboard/energy/district?year=2026
      */
+    @RequirePermission("dashboard:read")
     @GetMapping("/energy/district")
     public Result<List<Map<String, Object>>> districtEnergy(@RequestParam(required = false) Integer year) {
         int targetYear = year != null ? year : Year.now().getValue();
@@ -388,5 +402,65 @@ public class DashboardController {
                 .collect(Collectors.toList());
 
         return Result.success(result);
+    }
+
+    /**
+     * 边缘 AI 节点状态 — Dashboard 顶部卡片展示。
+     */
+    @RequirePermission("dashboard:read")
+    @GetMapping("/edge-status")
+    public Result<Map<String, Object>> edgeStatus() {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        int edgeTotal = decisionLogMapper.selectCount(
+                new LambdaQueryWrapper<DecisionLog>()
+                        .like(DecisionLog::getResult, "EDGE_")).intValue();
+
+        int edgeHits = decisionLogMapper.selectCount(
+                new LambdaQueryWrapper<DecisionLog>()
+                        .eq(DecisionLog::getResult, "EDGE_MATCH_EXECUTED")).intValue();
+
+        DecisionLog latest = decisionLogMapper.selectOne(
+                new LambdaQueryWrapper<DecisionLog>()
+                        .like(DecisionLog::getResult, "EDGE_")
+                        .orderByDesc(DecisionLog::getCreateTime)
+                        .last("LIMIT 1"));
+
+        result.put("totalDecisions", edgeTotal);
+        result.put("hitCount", edgeHits);
+        result.put("lastSimulatedAt", latest != null ? latest.getCreateTime().toString() : null);
+        result.put("enabled", true);
+        return Result.success(result);
+    }
+
+    /** 手动触发一次边缘决策模拟 */
+    @RequirePermission("dashboard:read")
+    @PostMapping("/edge/trigger")
+    public Result<Map<String, Object>> triggerEdgeSimulation() {
+        edgeNodeSimulator.simulate();
+        return edgeStatus();
+    }
+
+    /** 最近 20 条边缘决策记录 */
+    @RequirePermission("dashboard:read")
+    @GetMapping("/edge/recent")
+    public Result<List<Map<String, Object>>> edgeRecent() {
+        List<DecisionLog> logs = decisionLogMapper.selectList(
+                new LambdaQueryWrapper<DecisionLog>()
+                        .like(DecisionLog::getResult, "EDGE_")
+                        .orderByDesc(DecisionLog::getCreateTime)
+                        .last("LIMIT 20"));
+
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (DecisionLog log : logs) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("deviceId", log.getDeviceId());
+            row.put("matchedPolicy", log.getMatchedPolicy());
+            row.put("actionTaken", log.getActionTaken());
+            row.put("result", log.getResult());
+            row.put("createTime", log.getCreateTime() != null ? log.getCreateTime().toString() : null);
+            list.add(row);
+        }
+        return Result.success(list);
     }
 }

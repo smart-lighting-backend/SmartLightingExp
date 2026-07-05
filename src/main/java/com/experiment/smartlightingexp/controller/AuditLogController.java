@@ -2,6 +2,7 @@ package com.experiment.smartlightingexp.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.entity.AuditLog;
 import com.experiment.smartlightingexp.service.AuditLogService;
@@ -21,6 +22,7 @@ public class AuditLogController {
 
     private final AuditLogService auditLogService;
 
+    @RequirePermission("audit:read")
     @GetMapping("/system")
     public Result<Page<AuditLog>> getSystemLogs(
             @RequestParam(defaultValue = "1") Integer page,

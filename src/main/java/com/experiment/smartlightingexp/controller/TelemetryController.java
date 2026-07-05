@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.dto.TelemetryQueryRequest;
 import com.experiment.smartlightingexp.entity.Device;
@@ -36,6 +37,7 @@ public class TelemetryController {
      * 查询设备最新遥测数据（含光照强度）。
      * 数据来源：device.latestData JSON 快照字段。
      */
+    @RequirePermission("telemetry:read")
     @GetMapping("/latest/{deviceId}")
     public Result<Map<String, Object>> getLatest(@PathVariable String deviceId) {
         Device device = deviceService.lambdaQuery()
@@ -75,6 +77,7 @@ public class TelemetryController {
      * 查询遥测历史数据（分页）。
      * 支持按 deviceId、采集时间范围筛选。
      */
+    @RequirePermission("telemetry:read")
     @PostMapping("/history")
     public Result<IPage<Telemetry>> getHistory(@RequestBody TelemetryQueryRequest request) {
         LambdaQueryWrapper<Telemetry> wrapper = new LambdaQueryWrapper<>();

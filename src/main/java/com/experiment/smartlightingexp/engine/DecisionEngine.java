@@ -105,73 +105,9 @@ public class DecisionEngine {
 
     // ======================== 条件匹配器 ========================
 
-    @SuppressWarnings("unchecked")
+    /** 委托给 ConditionEvaluator（纯函数，保证云端与边缘评估逻辑一致） */
     public boolean matchesCondition(String conditionsJson, Telemetry telemetry) {
-        if (conditionsJson == null || conditionsJson.isBlank()) {
-            return false;
-        }
-        try {
-            Map<String, Object> conds = objectMapper.readValue(conditionsJson, Map.class);
-            for (Map.Entry<String, Object> entry : conds.entrySet()) {
-                if (!evaluateSingle(entry.getKey(), entry.getValue(), telemetry)) {
-                    return false; // AND 逻辑：任一条件不满足则整体不匹配
-                }
-            }
-            return true;
-        } catch (Exception e) {
-            log.error("Failed to parse conditions: {}", conditionsJson, e);
-            return false;
-        }
-    }
-
-    private boolean evaluateSingle(String key, Object value, Telemetry t) {
-        if (value == null) return false;
-        return switch (key) {
-            case "lux_lt" -> t.getIlluminance() != null && t.getIlluminance().compareTo(num(value)) < 0;
-            case "lux_gt" -> t.getIlluminance() != null && t.getIlluminance().compareTo(num(value)) > 0;
-            case "temp_lt" -> t.getTemperature() != null && t.getTemperature().compareTo(num(value)) < 0;
-            case "temp_gt" -> t.getTemperature() != null && t.getTemperature().compareTo(num(value)) > 0;
-            case "humidity_lt" -> t.getHumidity() != null && t.getHumidity().compareTo(num(value)) < 0;
-            case "humidity_gt" -> t.getHumidity() != null && t.getHumidity().compareTo(num(value)) > 0;
-            case "pir" -> t.getPir() != null && t.getPir().intValue() == intVal(value);
-            case "traffic_gt" -> t.getTrafficFlow() != null && t.getTrafficFlow() > intVal(value);
-            case "traffic_lt" -> t.getTrafficFlow() != null && t.getTrafficFlow() < intVal(value);
-            case "time_range" -> isInTimeRange(value.toString());
-            default -> {
-                // 跳过 group / startTime / extraActions 等元数据字段
-                yield true;
-            }
-        };
-    }
-
-    private boolean isInTimeRange(String range) {
-        // 格式: "23:00-05:59"
-        String[] parts = range.split("-");
-        if (parts.length != 2) return false;
-        try {
-            LocalTime start = LocalTime.parse(parts[0] + ":00");
-            LocalTime end = LocalTime.parse(parts[1] + ":00");
-            LocalTime now = LocalTime.now();
-            if (start.isBefore(end) || start.equals(end)) {
-                // 同一天内: 23:00-05:59 这种跨天需要用下面逻辑
-                // 这里处理不跨天情况
-                return !now.isBefore(start) && !now.isAfter(end);
-            } else {
-                // 跨天: 23:00-05:59
-                return !now.isBefore(start) || !now.isAfter(end);
-            }
-        } catch (Exception e) {
-            log.warn("Invalid time_range: {}", range);
-            return false;
-        }
-    }
-
-    private java.math.BigDecimal num(Object v) {
-        return new java.math.BigDecimal(v.toString());
-    }
-
-    private int intVal(Object v) {
-        return ((Number) v).intValue();
+        return ConditionEvaluator.matchesCondition(conditionsJson, telemetry);
     }
 
     // ======================== 执行动作 ========================

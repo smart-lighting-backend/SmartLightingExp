@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.entity.VoiceEvent;
 import com.experiment.smartlightingexp.service.VoiceEventService;
@@ -18,6 +19,7 @@ public class VoiceEventController {
 
     private final VoiceEventService voiceEventService;
 
+    @RequirePermission("events:read")
     @GetMapping("/page")
     public Result<IPage<VoiceEvent>> page(
             @RequestParam(defaultValue = "1") int page,
@@ -35,6 +37,7 @@ public class VoiceEventController {
         return Result.success(voiceEventService.page(new Page<>(page, size), wrapper));
     }
 
+    @RequirePermission("events:read")
     @GetMapping("/device/{deviceId}")
     public Result<IPage<VoiceEvent>> byDevice(
             @PathVariable String deviceId,
