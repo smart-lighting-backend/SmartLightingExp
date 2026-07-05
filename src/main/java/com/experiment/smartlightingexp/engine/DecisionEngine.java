@@ -37,6 +37,7 @@ public class DecisionEngine {
     private final DeviceMapper deviceMapper;
     private final MqttPublisher mqttPublisher;
     private final ObjectMapper objectMapper;
+    private final com.experiment.smartlightingexp.mapper.VoiceEventMapper voiceEventMapper;
 
     /** 手动控制后的 AI 锁定时间（分钟），由 MqttSubscriber 统一管理过期清除 */
     private static final long MANUAL_LOCK_MINUTES = 30;
@@ -205,6 +206,36 @@ public class DecisionEngine {
             decisionLog.setActionTaken(action);
             decisionLog.setResult("MATCH_EXECUTED");
             decisionLogMapper.insert(decisionLog);
+
+            // 4. 策略命中时联动语音告警
+            LightingPolicy matched = lightingPolicyMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<LightingPolicy>()
+                            .eq(LightingPolicy::getName, policyName)
+                            .eq(LightingPolicy::getDeleted, false));
+            if (matched != null && matched.getConditions() != null) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> conds = objectMapper.readValue(matched.getConditions(), Map.class);
+                    Object extra = conds.get("extraActions");
+                    if (extra instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> extraActions = (Map<String, Object>) extra;
+                        if (Boolean.TRUE.equals(extraActions.get("voiceAlert"))) {
+                            com.experiment.smartlightingexp.entity.VoiceEvent ve =
+                                    new com.experiment.smartlightingexp.entity.VoiceEvent();
+                            ve.setDeviceId(deviceId);
+                            ve.setType("警告");
+                            ve.setContent("策略触发: " + policyName + " → " + action);
+                            ve.setSource("自动");
+                            ve.setOccurredAt(LocalDateTime.now());
+                            voiceEventMapper.insert(ve);
+                            log.info("[{}] 🔊 Voice event from policy: {}", deviceId, policyName);
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.warn("[{}] Failed to parse extraActions for voice alert: {}", deviceId, ex.getMessage());
+                }
+            }
 
             log.info("[{}] Auto control → {} (policy={})", deviceId, action, policyName);
         } catch (Exception e) {

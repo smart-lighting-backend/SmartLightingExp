@@ -85,8 +85,73 @@ public class MockDataGenerator {
             } catch (Exception e) {
                 log.error("  [{}] ✗ publish failed: {}", device.getDeviceId(), e.getMessage());
             }
+
+            // 视觉事件生成：基于传感器数据触发
+            if (pir == 1 && random.nextDouble() < 0.3) {
+                publishVisionEvent(device.getDeviceId(), "行人检测", 0.70 + 0.29 * random.nextDouble());
+            }
+            if (trafficFlow > 10 && random.nextDouble() < 0.4) {
+                publishVisionEvent(device.getDeviceId(), "车辆通行", 0.70 + 0.29 * random.nextDouble());
+            }
+            if (random.nextDouble() < 0.05) {
+                String rareType = random.nextBoolean() ? "异常停车" : "危险场景";
+                publishVisionEvent(device.getDeviceId(), rareType, 0.60 + 0.39 * random.nextDouble());
+            }
+
+            // 语音事件生成：10% 随机概率
+            if (random.nextDouble() < 0.1) {
+                publishVoiceEvent(device.getDeviceId());
+            }
         }
         log.info("Result: {}/{} published", successCount, devices.size());
         log.info("================================");
+    }
+
+    private void publishVisionEvent(String deviceId, String eventType, double confidence) {
+        try {
+            Map<String, Object> event = new HashMap<>();
+            event.put("deviceId", deviceId);
+            event.put("eventType", eventType);
+            event.put("confidence", BigDecimal.valueOf(confidence).setScale(2, RoundingMode.HALF_UP));
+            event.put("snapshotRef", "mock/snapshot/" + deviceId + "_" + System.currentTimeMillis() + ".jpg");
+            event.put("occurredAt", LocalDateTime.now().toString());
+            String json = objectMapper.writeValueAsString(event);
+            String topic = mqttProperties.getTopicPrefix() + "/" + deviceId + "/vision/event";
+            mqttPublisher.publish(topic, json, 1);
+            log.info("  [{}] 👁 vision event: {}", deviceId, eventType);
+        } catch (Exception e) {
+            log.error("  [{}] ✗ vision event publish failed: {}", deviceId, e.getMessage());
+        }
+    }
+
+    private static final String[] VOICE_CONTENTS = {
+        "请注意，前方路段照明已开启，行人请注意安全",
+        "当前区域光照不足，路灯已自动调亮至80%",
+        "雨雾天气预警，请减速慢行，开启雾灯",
+        "设备自检完成，所有模块运行正常",
+        "夜间节能模式已启动，路灯亮度降至30%",
+        "道路施工区域，请注意避让",
+        "该区域车流量较大，已切换为高峰亮灯模式",
+        "空气质量异常，建议减少户外活动",
+    };
+
+    private void publishVoiceEvent(String deviceId) {
+        try {
+            String content = VOICE_CONTENTS[random.nextInt(VOICE_CONTENTS.length)];
+            String type = content.contains("预警") || content.contains("异常") ? "警告" :
+                    content.contains("请") ? "播报" : "广播";
+            Map<String, Object> event = new HashMap<>();
+            event.put("deviceId", deviceId);
+            event.put("type", type);
+            event.put("content", content);
+            event.put("source", "自动");
+            event.put("occurredAt", LocalDateTime.now().toString());
+            String json = objectMapper.writeValueAsString(event);
+            String topic = mqttProperties.getTopicPrefix() + "/" + deviceId + "/voice/event";
+            mqttPublisher.publish(topic, json, 1);
+            log.info("  [{}] 🔊 voice event: {} — {}", deviceId, type, content);
+        } catch (Exception e) {
+            log.error("  [{}] ✗ voice event publish failed: {}", deviceId, e.getMessage());
+        }
     }
 }
