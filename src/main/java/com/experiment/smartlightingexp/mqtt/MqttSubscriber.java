@@ -1,10 +1,12 @@
 package com.experiment.smartlightingexp.mqtt;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
 import com.experiment.smartlightingexp.entity.VisionEvent;
 import com.experiment.smartlightingexp.entity.VoiceEvent;
+import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.TelemetryMapper;
 import com.experiment.smartlightingexp.mapper.VisionEventMapper;
@@ -14,6 +16,7 @@ import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -33,6 +36,7 @@ public class MqttSubscriber {
     private final VoiceEventMapper voiceEventMapper;
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
+    private final ControlCommandMapper controlCommandMapper;
     private final DecisionEngine decisionEngine;
     private final AlarmRecordService alarmRecordService;
 
@@ -50,6 +54,7 @@ public class MqttSubscriber {
                     String json = new String(message.getPayload());
                     String deviceId = topic.split("/")[1];
 
+                    // 视觉事件
                     if (topic.endsWith("/vision/event")) {
                         VisionEvent ve = objectMapper.readValue(json, VisionEvent.class);
                         visionEventMapper.insert(ve);
@@ -57,6 +62,7 @@ public class MqttSubscriber {
                         alarmRecordService.resolveOfflineAlarm(deviceId);
                         return;
                     }
+                    // 语音事件
                     if (topic.endsWith("/voice/event")) {
                         VoiceEvent vo = objectMapper.readValue(json, VoiceEvent.class);
                         voiceEventMapper.insert(vo);
@@ -64,8 +70,26 @@ public class MqttSubscriber {
                         alarmRecordService.resolveOfflineAlarm(deviceId);
                         return;
                     }
+                    // 指令确认 ACK
+                    if (topic.endsWith("/command/ack")) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> ack = objectMapper.readValue(json, Map.class);
+                        Object cmdIdObj = ack.get("commandId");
+                        Long commandId = cmdIdObj != null ? Long.valueOf(cmdIdObj.toString()) : null;
+                        if (commandId != null) {
+                            ControlCommand cmd = controlCommandMapper.selectById(commandId);
+                            if (cmd != null && cmd.getAckAt() == null) {
+                                String ackStatus = ack.get("status") != null ? ack.get("status").toString() : "ACKED";
+                                cmd.setStatus(ackStatus);
+                                cmd.setAckAt(LocalDateTime.now());
+                                controlCommandMapper.updateById(cmd);
+                                log.info("  [{}] ✅ ACK received: cmdId={}, status={}", deviceId, commandId, ackStatus);
+                            }
+                        }
+                        return;
+                    }
 
-                    // telemetry topic
+                    // 遥测数据
                     Telemetry telemetry = objectMapper.readValue(json, Telemetry.class);
                     telemetryMapper.insert(telemetry);
                     LocalDateTime now = LocalDateTime.now();
@@ -118,7 +142,8 @@ public class MqttSubscriber {
             mqttClient.subscribe("streetlight/+/telemetry", 1);
             mqttClient.subscribe("streetlight/+/vision/event", 1);
             mqttClient.subscribe("streetlight/+/voice/event", 1);
-            log.info("MQTT subscriber ready, topics=telemetry,vision/event,voice/event");
+            mqttClient.subscribe("streetlight/+/command/ack", 1);
+            log.info("MQTT subscriber ready, topics=telemetry,vision/event,voice/event,command/ack");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
         }
