@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.entity.AuditLog;
@@ -153,6 +154,7 @@ public class RoleController {
     /**
      * 分配角色权限（覆盖式：先清空旧权限，再设置新权限）。
      */
+    @RequirePermission("role:assign")
     @PutMapping("/{id}/permissions")
     public Result<Void> assignPermissions(@PathVariable Long id,
                                           @RequestBody Map<String, List<Long>> body,

@@ -36,7 +36,8 @@ INSERT INTO `permission` (parent_id, name, permission_code, type, description) V
 (NULL, '系统日志', 'audit',      'MODULE', '查看操作审计日志'),
 (NULL, '用户管理', 'user',       'MODULE', '用户增删改查和角色分配'),
 (NULL, '权限管理', 'permission', 'MODULE', '权限条目管理'),
-(NULL, '菜单管理', 'menu',       'MODULE', '动态菜单配置');
+(NULL, '菜单管理', 'menu',       'MODULE', '动态菜单配置'),
+(NULL, '角色管理', 'role',       'MODULE', '角色增删改查和权限分配');
 
 -- 3.2 设备管理操作级权限（5 个）
 INSERT INTO `permission` (parent_id, name, permission_code, type, description)
@@ -109,6 +110,18 @@ INSERT INTO `permission` (parent_id, name, permission_code, type, description)
 SELECT p.id, '菜单编辑', 'menu:update',  'ACTION', '修改菜单'     FROM `permission` p WHERE p.permission_code = 'menu';
 INSERT INTO `permission` (parent_id, name, permission_code, type, description)
 SELECT p.id, '菜单删除', 'menu:delete',  'ACTION', '删除菜单'     FROM `permission` p WHERE p.permission_code = 'menu';
+
+-- 3.9 角色管理操作级权限（5 个）
+INSERT INTO `permission` (parent_id, name, permission_code, type, description)
+SELECT p.id, '角色查看', 'role:read',    'ACTION', '查看角色列表' FROM `permission` p WHERE p.permission_code = 'role';
+INSERT INTO `permission` (parent_id, name, permission_code, type, description)
+SELECT p.id, '角色新增', 'role:create',  'ACTION', '新增角色'     FROM `permission` p WHERE p.permission_code = 'role';
+INSERT INTO `permission` (parent_id, name, permission_code, type, description)
+SELECT p.id, '角色编辑', 'role:update',  'ACTION', '修改角色'     FROM `permission` p WHERE p.permission_code = 'role';
+INSERT INTO `permission` (parent_id, name, permission_code, type, description)
+SELECT p.id, '角色删除', 'role:delete',  'ACTION', '删除角色'     FROM `permission` p WHERE p.permission_code = 'role';
+INSERT INTO `permission` (parent_id, name, permission_code, type, description)
+SELECT p.id, '角色授权', 'role:assign',  'ACTION', '为角色分配权限' FROM `permission` p WHERE p.permission_code = 'role';
 
 -- ============================================================
 -- 4. 菜单表
