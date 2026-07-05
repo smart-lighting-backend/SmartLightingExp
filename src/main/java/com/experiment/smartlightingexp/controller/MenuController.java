@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.controller;
 
+import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.MenuTreeNode;
@@ -30,6 +31,7 @@ public class MenuController {
     /**
      * 获取完整菜单树（后台管理用）。
      */
+    @RequirePermission("menu:read")
     @GetMapping("/tree")
     public Result<List<MenuTreeNode>> getTree() {
         return Result.success(menuService.getMenuTree());
@@ -47,6 +49,7 @@ public class MenuController {
     /**
      * 查询所有菜单（扁平列表）。
      */
+    @RequirePermission("menu:read")
     @GetMapping
     public Result<List<Menu>> list() {
         return Result.success(menuService.list());
@@ -55,6 +58,7 @@ public class MenuController {
     /**
      * 新增菜单。
      */
+    @RequirePermission("menu:create")
     @PostMapping
     public Result<Void> create(@RequestBody Menu menu, HttpServletRequest request) {
         if (menu.getName() == null || menu.getName().isBlank()) {
@@ -70,6 +74,7 @@ public class MenuController {
     /**
      * 修改菜单。
      */
+    @RequirePermission("menu:update")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id, @RequestBody Menu menu,
                                HttpServletRequest request) {
@@ -99,6 +104,7 @@ public class MenuController {
     /**
      * 删除菜单。
      */
+    @RequirePermission("menu:delete")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id, HttpServletRequest request) {
         Menu existing = menuService.getById(id);

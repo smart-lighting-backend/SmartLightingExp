@@ -14,4 +14,9 @@ public interface PermissionService extends IService<Permission> {
      * 根据角色ID查询该角色拥有的权限编码列表。
      */
     List<String> getPermissionCodesByRoleId(Long roleId);
+
+    /**
+     * 根据角色编码查询该角色拥有的权限编码列表（动态查询，分配后即时生效）。
+     */
+    List<String> getPermissionCodesByRoleCode(String roleCode);
 }
