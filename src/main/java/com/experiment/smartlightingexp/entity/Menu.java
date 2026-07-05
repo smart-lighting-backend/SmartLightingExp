@@ -1,8 +1,6 @@
 package com.experiment.smartlightingexp.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -18,6 +16,7 @@ public class Menu {
     private Long id;
 
     /** 父菜单ID（NULL=顶级菜单） */
+    @TableField(value = "parent_id", updateStrategy = FieldStrategy.IGNORED)
     private Long parentId;
 
     /** 菜单名称 */

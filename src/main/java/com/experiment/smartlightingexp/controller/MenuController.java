@@ -92,7 +92,7 @@ public class MenuController {
         if (menu.getComponent() != null) existing.setComponent(menu.getComponent());
         if (menu.getSort() != null) existing.setSort(menu.getSort());
         if (menu.getEnabled() != null) existing.setEnabled(menu.getEnabled());
-        if (menu.getParentId() != null) existing.setParentId(menu.getParentId());
+        existing.setParentId(menu.getParentId()); // 允许设为 null（子→一级）
 
         menuService.updateById(existing);
         saveAuditLog("MENU_UPDATE", "MENU", String.valueOf(id),
