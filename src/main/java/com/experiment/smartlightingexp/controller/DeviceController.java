@@ -286,6 +286,9 @@ public class DeviceController {
     private final AlarmRecordMapper alarmRecordMapper;
     private final TelemetryMapper telemetryMapper;
     private final ControlCommandMapper controlCommandMapper;
+    private final VisionEventService visionEventService;
+    private final VoiceEventService voiceEventService;
+    private final AlarmRecordService alarmRecordService;
     private final ObjectMapper objectMapper;
 
     @GetMapping("/{deviceId}/health")
@@ -444,5 +447,83 @@ public class DeviceController {
             double d = Double.parseDouble(val.toString());
             return (d >= min && d <= max) ? 0 : 1;
         } catch (NumberFormatException e) { return 1; }
+    }
+
+    /** 融合感知面板：聚合遥测 + 视觉 + 语音 + 告警 + 健康分 */
+    @GetMapping("/{deviceId}/perception")
+    public Result<Map<String, Object>> perception(@PathVariable String deviceId) {
+        Device device = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId).eq(Device::getDeleted, false).one();
+        if (device == null) return Result.error("设备不存在");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", device.getDeviceId());
+        result.put("deviceName", device.getName());
+        result.put("status", device.getStatus());
+        result.put("lastHeartbeatAt", device.getLastHeartbeatAt() != null ? device.getLastHeartbeatAt().toString() : null);
+        result.put("healthScore", device.getHealthScore());
+
+        // 遥测快照
+        if (device.getLatestData() != null && !device.getLatestData().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> telemetry = objectMapper.readValue(device.getLatestData(), Map.class);
+                result.put("telemetry", telemetry);
+            } catch (JsonProcessingException e) {
+                result.put("telemetry", null);
+            }
+        } else {
+            result.put("telemetry", null);
+        }
+
+        // 最新视觉事件
+        VisionEvent ve = visionEventService.getOne(
+                new LambdaQueryWrapper<VisionEvent>()
+                        .eq(VisionEvent::getDeviceId, deviceId)
+                        .orderByDesc(VisionEvent::getOccurredAt).last("LIMIT 1"));
+        if (ve != null) {
+            Map<String, Object> veMap = new LinkedHashMap<>();
+            veMap.put("eventType", ve.getEventType());
+            veMap.put("confidence", ve.getConfidence());
+            veMap.put("snapshotRef", ve.getSnapshotRef());
+            veMap.put("occurredAt", ve.getOccurredAt() != null ? ve.getOccurredAt().toString() : null);
+            result.put("latestVision", veMap);
+        } else {
+            result.put("latestVision", null);
+        }
+
+        // 最新语音事件
+        VoiceEvent vo = voiceEventService.getOne(
+                new LambdaQueryWrapper<VoiceEvent>()
+                        .eq(VoiceEvent::getDeviceId, deviceId)
+                        .orderByDesc(VoiceEvent::getOccurredAt).last("LIMIT 1"));
+        if (vo != null) {
+            Map<String, Object> voMap = new LinkedHashMap<>();
+            voMap.put("type", vo.getType());
+            voMap.put("content", vo.getContent());
+            voMap.put("source", vo.getSource());
+            voMap.put("occurredAt", vo.getOccurredAt() != null ? vo.getOccurredAt().toString() : null);
+            result.put("latestVoice", voMap);
+        } else {
+            result.put("latestVoice", null);
+        }
+
+        // 最近告警
+        List<AlarmRecord> alarms = alarmRecordService.list(
+                new LambdaQueryWrapper<AlarmRecord>()
+                        .eq(AlarmRecord::getDeviceId, deviceId)
+                        .orderByDesc(AlarmRecord::getStartAt).last("LIMIT 3"));
+        List<Map<String, Object>> alarmList = new ArrayList<>();
+        for (AlarmRecord a : alarms) {
+            Map<String, Object> am = new LinkedHashMap<>();
+            am.put("type", a.getType());
+            am.put("level", a.getLevel());
+            am.put("startAt", a.getStartAt() != null ? a.getStartAt().toString() : null);
+            am.put("recoverAt", a.getRecoverAt() != null ? a.getRecoverAt().toString() : null);
+            alarmList.add(am);
+        }
+        result.put("recentAlarms", alarmList);
+
+        return Result.success(result);
     }
 }
