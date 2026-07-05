@@ -9,6 +9,8 @@ import com.experiment.smartlightingexp.entity.Role;
 import com.experiment.smartlightingexp.mapper.AuditLogMapper;
 import com.experiment.smartlightingexp.mapper.PermissionMapper;
 import com.experiment.smartlightingexp.service.RoleService;
+
+import static com.experiment.smartlightingexp.controller.PermissionController.HIDDEN_PERMISSION_CODES;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 角色管理控制器 — 角色增删改查 + 权限分配。
@@ -65,8 +68,10 @@ public class RoleController {
 
         // 查权限编码
         List<String> permissionCodes = roleService.getPermissionCodesByRoleId(id);
-        // 查权限详情（ID + 编码 + 名称）
-        List<Permission> allPermissions = permissionMapper.selectList(null);
+        // 查权限详情（ID + 编码 + 名称），过滤隐藏权限
+        List<Permission> allPermissions = permissionMapper.selectList(null).stream()
+                .filter(p -> !HIDDEN_PERMISSION_CODES.contains(p.getPermissionCode()))
+                .collect(Collectors.toList());
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", role.getId());
@@ -183,11 +188,13 @@ public class RoleController {
     }
 
     /**
-     * 查询所有权限（供权限分配下拉选择）。
+     * 查询所有权限（供权限分配下拉选择），过滤隐藏权限。
      */
     @GetMapping("/permissions")
     public Result<List<Permission>> getAllPermissions() {
-        List<Permission> permissions = permissionMapper.selectList(null);
+        List<Permission> permissions = permissionMapper.selectList(null).stream()
+                .filter(p -> !HIDDEN_PERMISSION_CODES.contains(p.getPermissionCode()))
+                .collect(Collectors.toList());
         return Result.success(permissions);
     }
 

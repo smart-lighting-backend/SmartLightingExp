@@ -29,6 +29,12 @@ public class PermissionController {
     private final PermissionService permissionService;
     private final AuditLogMapper auditLogMapper;
 
+    /** 前端 UI 未暴露操作的权限，不展示/返回给前端 */
+    static final Set<String> HIDDEN_PERMISSION_CODES = Set.of(
+            "menu:create", "menu:delete",
+            "permission:create", "permission:delete"
+    );
+
     /**
      * 获取权限树（用于前端权限分配树形选择器）。
      * 可选参数: roleId — 若传入，标记该角色已拥有的权限节点为 checked。
@@ -37,6 +43,11 @@ public class PermissionController {
     @GetMapping("/tree")
     public Result<List<PermissionTreeNode>> getTree(@RequestParam(required = false) Long roleId) {
         List<Permission> allPermissions = permissionService.list();
+
+        // 过滤掉前端 UI 未暴露的权限
+        allPermissions = allPermissions.stream()
+                .filter(p -> !HIDDEN_PERMISSION_CODES.contains(p.getPermissionCode()))
+                .collect(Collectors.toList());
 
         // 该角色已拥有的权限ID集合
         Set<Long> checkedIds = new HashSet<>();
