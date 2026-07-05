@@ -297,18 +297,21 @@ public class DeviceController {
                 .eq(Device::getDeviceId, deviceId).eq(Device::getDeleted, false).one();
         if (device == null) return Result.error("设备不存在");
 
+        // 健康总分使用已存储的 health_score，与设备列表/详情页保持一致
+        int overallScore = device.getHealthScore() != null ? device.getHealthScore().intValue() : 0;
+
+        // 四个维度仍实时计算，展示诊断细节（权重与 HealthScoreTask 一致）
         int offline = calcOffline(deviceId);
         int comm = calcComm(deviceId);
         int response = calcResponse(deviceId);
         int sensor = calcSensor(device);
-        int total = (int) Math.round(0.30 * offline + 0.25 * comm + 0.25 * response + 0.20 * sensor);
 
         String level;
         String color;
-        if (total >= 90) { level = "优秀"; color = "#4caf50"; }
-        else if (total >= 70) { level = "良好"; color = "#ff9800"; }
-        else if (total >= 50) { level = "一般"; color = "#ff9800"; }
-        else if (total >= 30) { level = "较差"; color = "#f44336"; }
+        if (overallScore >= 90) { level = "优秀"; color = "#4caf50"; }
+        else if (overallScore >= 70) { level = "良好"; color = "#ff9800"; }
+        else if (overallScore >= 50) { level = "一般"; color = "#ff9800"; }
+        else if (overallScore >= 30) { level = "较差"; color = "#f44336"; }
         else { level = "危险"; color = "#f44336"; }
 
         List<Map<String, Object>> dimensions = new ArrayList<>();
@@ -317,15 +320,15 @@ public class DeviceController {
         dimensions.add(dimItem("指令响应率", response, "25%", response == 100 ? null : "部分指令未收到设备确认"));
         dimensions.add(dimItem("传感器状态", sensor, "20%", sensor == 100 ? null : "部分传感器读数异常或为空"));
 
-        String suggestion = total >= 90 ? "设备状态极佳" :
-                total >= 70 ? "设备总体健康，建议定期巡检" :
-                total >= 50 ? "关注设备运行状况，建议安排检查" :
+        String suggestion = overallScore >= 90 ? "设备状态极佳" :
+                overallScore >= 70 ? "设备总体健康，建议定期巡检" :
+                overallScore >= 50 ? "关注设备运行状况，建议安排检查" :
                 "设备健康度较低，建议尽快安排维修";
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("deviceId", deviceId);
         result.put("deviceName", device.getName());
-        result.put("overallScore", total);
+        result.put("overallScore", overallScore);
         result.put("level", level);
         result.put("levelColor", color);
         result.put("dimensions", dimensions);

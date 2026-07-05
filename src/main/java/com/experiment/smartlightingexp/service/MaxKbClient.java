@@ -12,8 +12,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -23,20 +26,31 @@ public class MaxKbClient {
     private final MaxKbProperties properties;
     private final ObjectMapper objectMapper;
 
+    /** 兼容旧调用：纯用户消息，无 system prompt */
     public String chat(String question) {
+        return chatInternal(List.of(
+                Map.of("role", "user", "content", question)
+        ));
+    }
+
+    /** 带 system prompt 的调用，返回原始文本（可能包含 JSON） */
+    public String chatWithSystem(String systemPrompt, String userMessage) {
+        return chatInternal(List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userMessage)
+        ));
+    }
+
+    private String chatInternal(List<Map<String, String>> messages) {
         if (!properties.isConfigured()) {
             throw new BusinessException(500, "MaxKB 未配置，请设置 MAXKB_CHAT_COMPLETIONS_URL 和 MAXKB_API_KEY");
         }
 
         try {
-            // 手动序列化 JSON，确保 UTF-8 编码正确
             String requestJson = objectMapper.writeValueAsString(Map.of(
                     "model", properties.getModel(),
                     "stream", false,
-                    "messages", List.of(Map.of(
-                            "role", "user",
-                            "content", question
-                    ))
+                    "messages", messages
             ));
 
             String responseJson = RestClient.create()
@@ -63,6 +77,52 @@ public class MaxKbClient {
             throw new BusinessException(502, "MaxKB 服务异常: " + e.getMessage());
         }
     }
+
+    // ── JSON 提取 ────────────────────────────────────────────────────────────
+
+    private static final Pattern JSON_BLOCK = Pattern.compile(
+            "```(?:json)?\\s*([\\s\\S]*?)```");
+    private static final Pattern JSON_OBJECT = Pattern.compile(
+            "\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}");
+
+    /**
+     * 从 MaxKB 返回的文本中尝试提取 JSON 对象。
+     * 优先匹配 ```json ... ``` 代码块，其次匹配裸 JSON 对象。
+     */
+    public Map<String, Object> tryExtractJson(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+
+        // 1. 尝试整体解析（理想情况：MaxKB 只返回了纯 JSON）
+        Map<String, Object> parsed = tryParse(raw.trim());
+        if (parsed != null) return parsed;
+
+        // 2. 匹配 ```json ... ``` 代码块
+        Matcher block = JSON_BLOCK.matcher(raw);
+        while (block.find()) {
+            parsed = tryParse(block.group(1).trim());
+            if (parsed != null) return parsed;
+        }
+
+        // 3. 在文本中搜索 JSON 对象
+        Matcher obj = JSON_OBJECT.matcher(raw);
+        while (obj.find()) {
+            parsed = tryParse(obj.group());
+            if (parsed != null && parsed.containsKey("intent")) return parsed;
+        }
+
+        return null;
+    }
+
+    private Map<String, Object> tryParse(String candidate) {
+        try {
+            return objectMapper.readValue(candidate,
+                    new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ── 内容提取 ────────────────────────────────────────────────────────────
 
     private String extractContent(Map<String, Object> response) {
         if (response == null) {

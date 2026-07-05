@@ -105,6 +105,7 @@ public class MqttSubscriber {
                         deviceMapper.update(null,
                                 Wrappers.<Device>lambdaUpdate()
                                         .eq(Device::getDeviceId, deviceId)
+                                        .set(Device::getLatestData, json)
                                         .set(Device::getLastHeartbeatAt, now)
                                         .set(Device::getStatus, 1));
                         log.info("  [{}] ← MQTT received (manual mode, AI skipped) → DB inserted (id={})",

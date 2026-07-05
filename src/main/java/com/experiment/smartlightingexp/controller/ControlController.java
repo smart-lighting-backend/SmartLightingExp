@@ -111,34 +111,14 @@ public class ControlController {
         cmd.setResultDetail("手动控制-" + cmdStr);
         controlCommandMapper.insert(cmd);
 
-        // 4. 更新设备 — 手动模式 + 锁定时间 + 设备状态快照
+        // 4. 更新设备 — 手动模式 + 锁定时间（不覆盖 latestData，保留遥测快照）
         LocalDateTime now = LocalDateTime.now();
-        try {
-            Map<String, Object> controlState = new HashMap<>();
-            controlState.put("action", cmdStr);
-            controlState.put("brightness", "DIMMING".equals(request.getAction()) ? request.getBrightness()
-                    : ("ON".equals(request.getAction()) ? 100 : 0));
-            controlState.put("controlledAt", now.toString());
-            controlState.put("source", "MANUAL");
-            String latestDataJson = objectMapper.writeValueAsString(controlState);
-
-            deviceMapper.update(null,
-                    new LambdaUpdateWrapper<Device>()
-                            .eq(Device::getDeviceId, deviceId)
-                            .set(Device::getLastManualAt, now)
-                            .set(Device::getManualMode, true)
-                            .set(Device::getManualExpireAt, now.plusMinutes(manualLockDurationMinutes))
-                            .set(Device::getLatestData, latestDataJson));
-        } catch (Exception e) {
-            // latestData 更新失败不影响主流程，降级为只更新手动模式标记
-            deviceMapper.update(null,
-                    new LambdaUpdateWrapper<Device>()
-                            .eq(Device::getDeviceId, deviceId)
-                            .set(Device::getLastManualAt, now)
-                            .set(Device::getManualMode, true)
-                            .set(Device::getManualExpireAt, now.plusMinutes(manualLockDurationMinutes)));
-            log.warn("[{}] Failed to update latestData: {}", deviceId, e.getMessage());
-        }
+        deviceMapper.update(null,
+                new LambdaUpdateWrapper<Device>()
+                        .eq(Device::getDeviceId, deviceId)
+                        .set(Device::getLastManualAt, now)
+                        .set(Device::getManualMode, true)
+                        .set(Device::getManualExpireAt, now.plusMinutes(manualLockDurationMinutes)));
 
         // 5. 审计日志
         saveAuditLog("CONTROL", "DEVICE", deviceId, "手动控制-" + cmdStr, "SUCCESS", httpRequest);
