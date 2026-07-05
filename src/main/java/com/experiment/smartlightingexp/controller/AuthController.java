@@ -113,7 +113,8 @@ public class AuthController {
         }
         String username = jwtUtil.extractSubject(token);
         String roleCode = jwtUtil.extractRoleCode(token);
-        List<String> permissions = jwtUtil.extractPermissions(token);
+        // 从数据库动态查询权限（Token 中的已是旧数据，分配权限后新 Token 才能更新）
+        List<String> permissions = permissionService.getPermissionCodesByRoleCode(roleCode);
         List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
 
         return Result.success(new LoginResponse(token, username, roleCode, permissions, menus));
