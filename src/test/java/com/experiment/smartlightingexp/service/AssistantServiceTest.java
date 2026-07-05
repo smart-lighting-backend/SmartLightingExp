@@ -3,6 +3,9 @@ package com.experiment.smartlightingexp.service;
 import com.experiment.smartlightingexp.dto.AssistantChatResponse;
 import com.experiment.smartlightingexp.entity.LightingPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.experiment.smartlightingexp.service.DeviceService;
+import com.experiment.smartlightingexp.service.AlarmRecordService;
+import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -18,8 +21,11 @@ class AssistantServiceTest {
 
     private final MaxKbClient maxKbClient = mock(MaxKbClient.class);
     private final LightingPolicyService lightingPolicyService = mock(LightingPolicyService.class);
+    private final DeviceService deviceService = mock(DeviceService.class);
+    private final AlarmRecordService alarmRecordService = mock(AlarmRecordService.class);
+    private final ControlCommandMapper controlCommandMapper = mock(ControlCommandMapper.class);
     private final AssistantService assistantService = new AssistantService(
-            maxKbClient, lightingPolicyService, new ObjectMapper());
+            maxKbClient, lightingPolicyService, new ObjectMapper(), deviceService, alarmRecordService, controlCommandMapper);
 
     @Test
     void thresholdCommandUpdatesPolicyWithoutCallingMaxKb() {
