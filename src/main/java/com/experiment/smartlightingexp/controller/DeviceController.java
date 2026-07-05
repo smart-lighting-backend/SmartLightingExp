@@ -22,7 +22,6 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.*;
 
 /**
  * 设备管理控制器 — 设备增删改查 + 组合条件分页查询。
@@ -181,6 +180,82 @@ public class DeviceController {
                 "新增设备-" + device.getName(), "SUCCESS", httpRequest);
         log.info("[设备] 新增: deviceId={}, name={}", device.getDeviceId(), device.getName());
         return Result.success(device);
+    }
+
+    /**
+     * 批量新增设备。
+     */
+    @RequirePermission("device:create")
+    @PostMapping("/batch")
+    public Result<Map<String, Object>> batchCreate(@RequestBody List<Device> devices,
+                                                    HttpServletRequest httpRequest) {
+        if (devices == null || devices.isEmpty()) {
+            return Result.error(400, "设备列表不能为空");
+        }
+
+        List<Map<String, Object>> failed = new ArrayList<>();
+        List<Device> toSave = new ArrayList<>();
+
+        // 获取已有 deviceId 集合
+        Set<String> existingIds = new HashSet<>(deviceService.lambdaQuery()
+                .select(Device::getDeviceId)
+                .list()
+                .stream()
+                .map(Device::getDeviceId)
+                .toList());
+        Set<String> batchIds = new HashSet<>();
+
+        for (int i = 0; i < devices.size(); i++) {
+            Device d = devices.get(i);
+            int row = i + 1;
+
+            if (d.getDeviceId() == null || d.getDeviceId().isBlank()) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", row);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "设备编号不能为空");
+                failed.add(err);
+                continue;
+            }
+
+            // 重复检测：已有设备 + 本批次内重复
+            if (existingIds.contains(d.getDeviceId()) || batchIds.contains(d.getDeviceId())) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", row);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "设备编号重复");
+                failed.add(err);
+                continue;
+            }
+
+            batchIds.add(d.getDeviceId());
+
+            // 设置默认值
+            if (d.getStatus() == null) d.setStatus(1);
+            if (d.getEnabled() == null) d.setEnabled(true);
+            if (d.getHealthScore() == null) d.setHealthScore(new BigDecimal("100.00"));
+            if (d.getTopicPrefix() == null || d.getTopicPrefix().isBlank()) d.setTopicPrefix("streetlight");
+            d.setDeleted(false);
+            toSave.add(d);
+        }
+
+        // 批量写入
+        if (!toSave.isEmpty()) {
+            deviceService.saveBatch(toSave);
+            for (Device d : toSave) {
+                saveAuditLog("DEVICE_CREATE", "DEVICE", d.getDeviceId(),
+                        "批量新增-" + d.getName(), "SUCCESS", httpRequest);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", devices.size());
+        result.put("success", toSave.size());
+        result.put("failed", failed.size());
+        result.put("failedDetails", failed);
+
+        log.info("[设备] 批量新增: 总数={}, 成功={}, 失败={}", devices.size(), toSave.size(), failed.size());
+        return Result.success(result);
     }
 
     /**
