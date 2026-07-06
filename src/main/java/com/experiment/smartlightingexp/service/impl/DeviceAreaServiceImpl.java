@@ -31,6 +31,13 @@ public class DeviceAreaServiceImpl extends ServiceImpl<DeviceAreaMapper, DeviceA
                 .orderByAsc(DeviceArea::getCreateTime)
                 .list();
 
+        // 查询所有未删除设备的区域分布
+        Map<Long, Long> deviceCountMap = deviceMapper.selectList(new LambdaQueryWrapper<Device>()
+                        .eq(Device::getDeleted, false)
+                        .isNotNull(Device::getAreaId))
+                .stream()
+                .collect(Collectors.groupingBy(Device::getAreaId, Collectors.counting()));
+
         // 按 parentId 分组
         Map<Long, List<DeviceArea>> grouped = all.stream()
                 .filter(a -> a.getParentId() != null)
@@ -40,27 +47,36 @@ public class DeviceAreaServiceImpl extends ServiceImpl<DeviceAreaMapper, DeviceA
         List<Map<String, Object>> tree = new ArrayList<>();
         for (DeviceArea area : all) {
             if (area.getParentId() == null) {
-                tree.add(buildNode(area, grouped));
+                tree.add(buildNode(area, grouped, deviceCountMap));
             }
         }
         return tree;
     }
 
-    /** 递归构建树节点。 */
-    private Map<String, Object> buildNode(DeviceArea area, Map<Long, List<DeviceArea>> grouped) {
+    /** 递归构建树节点，deviceCount 含子区域累计。 */
+    private Map<String, Object> buildNode(DeviceArea area, Map<Long, List<DeviceArea>> grouped,
+                                          Map<Long, Long> deviceCountMap) {
         Map<String, Object> node = new LinkedHashMap<>();
         node.put("id", area.getId());
         node.put("name", area.getName());
         node.put("description", area.getDescription());
         node.put("parentId", area.getParentId());
 
+        long deviceCount = deviceCountMap.getOrDefault(area.getId(), 0L);
+
         List<DeviceArea> children = grouped.get(area.getId());
         if (children != null && !children.isEmpty()) {
             List<Map<String, Object>> childNodes = children.stream()
-                    .map(child -> buildNode(child, grouped))
+                    .map(child -> buildNode(child, grouped, deviceCountMap))
                     .collect(Collectors.toList());
+            // 累加子区域的设备数
+            deviceCount += childNodes.stream()
+                    .mapToLong(n -> (Long) n.get("deviceCount"))
+                    .sum();
             node.put("children", childNodes);
         }
+
+        node.put("deviceCount", deviceCount);
         return node;
     }
 

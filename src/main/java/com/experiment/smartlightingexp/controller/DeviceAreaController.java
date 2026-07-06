@@ -87,7 +87,7 @@ public class DeviceAreaController {
         }
         if (area.getName() != null) existing.setName(area.getName());
         if (area.getDescription() != null) existing.setDescription(area.getDescription());
-        if (area.getParentId() != null) existing.setParentId(area.getParentId());
+        existing.setParentId(area.getParentId());
         if (area.getEnabled() != null) existing.setEnabled(area.getEnabled());
         deviceAreaService.updateById(existing);
 

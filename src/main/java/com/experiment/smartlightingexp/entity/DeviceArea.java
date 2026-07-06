@@ -1,6 +1,7 @@
 package com.experiment.smartlightingexp.entity;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -26,6 +27,7 @@ public class DeviceArea {
     private String description;
 
     /** 父区域 ID，null 表示顶级区域 */
+    @TableField(value = "parent_id", updateStrategy = FieldStrategy.IGNORED)
     private Long parentId;
 
     /** 是否启用 */
