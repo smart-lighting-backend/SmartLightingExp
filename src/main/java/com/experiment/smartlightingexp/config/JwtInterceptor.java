@@ -2,7 +2,9 @@ package com.experiment.smartlightingexp.config;
 
 import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.SecurityContext;
+import com.experiment.smartlightingexp.entity.User;
 import com.experiment.smartlightingexp.mapper.PermissionMapper;
+import com.experiment.smartlightingexp.service.UserService;
 import com.experiment.smartlightingexp.util.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -29,6 +31,7 @@ public class JwtInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final PermissionMapper permissionMapper;
+    private final UserService userService;
     private static final String SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 
     /**
@@ -74,15 +77,28 @@ public class JwtInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        // 4. 从 Token 中解析基础信息，但权限从数据库动态查询（分配权限后即时生效）
+        // 4. 从 Token 中解析基础信息
         String username = jwtUtil.extractSubject(token);
         String roleCode = jwtUtil.extractRoleCode(token);
+
+        // 5. 检查用户是否已被停用（管理员停用用户后即时生效）
+        User user = userService.getByUsername(username);
+        if (user == null || !user.getEnabled()) {
+            log.warn("[JWT拦截] 账号已停用, 拒绝请求: username={}, path={}", username, path);
+            response.setContentType("application/json;charset=utf-8");
+            response.getWriter().write(
+                    "{\"code\":1003,\"msg\":\"账号已停用，请联系管理员\",\"data\":null}");
+            SecurityContext.clear();
+            return false;
+        }
+
+        // 6. 权限从数据库动态查询（分配权限后即时生效）
         List<String> permissions = getEffectivePermissions(roleCode);
 
         SecurityContext.setCurrentUser(
                 new SecurityContext.UserInfo(username, roleCode, permissions));
 
-        // 5. 校验方法级权限（@RequirePermission 注解）
+        // 7. 校验方法级权限（@RequirePermission 注解）
         if (handler instanceof HandlerMethod) {
             HandlerMethod handlerMethod = (HandlerMethod) handler;
             RequirePermission annotation = handlerMethod.getMethodAnnotation(RequirePermission.class);

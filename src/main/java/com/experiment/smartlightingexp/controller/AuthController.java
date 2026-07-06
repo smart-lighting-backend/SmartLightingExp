@@ -53,11 +53,17 @@ public class AuthController {
                                        HttpServletRequest httpRequest) {
         // 1. 查询用户
         User user = userService.getByUsername(request.getUsername());
-        if (user == null || !user.getEnabled()) {
-            log.warn("[登录失败] 用户不存在或已禁用: {}", request.getUsername());
+        if (user == null) {
+            log.warn("[登录失败] 用户不存在: {}", request.getUsername());
             auditLog(request.getUsername(), "LOGIN", "SYSTEM", null,
-                    "登录失败-用户不存在或已禁用", "FAIL", getClientIp(httpRequest));
+                    "登录失败-用户不存在", "FAIL", getClientIp(httpRequest));
             return Result.error(401, "用户名或密码错误");
+        }
+        if (!user.getEnabled()) {
+            log.warn("[登录失败] 账号已停用: {}", request.getUsername());
+            auditLog(request.getUsername(), "LOGIN", "SYSTEM", null,
+                    "登录失败-账号已停用", "FAIL", getClientIp(httpRequest));
+            return Result.error(1003, "账号已停用，请联系管理员");
         }
 
         // 2. 校验密码（BCrypt 加密比对）
