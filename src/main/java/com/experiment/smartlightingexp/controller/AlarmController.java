@@ -154,7 +154,7 @@ public class AlarmController {
     /**
      * 处理/确认告警：设置处理人、恢复时间和备注。
      */
-    @RequirePermission("alarm:read")
+    @RequirePermission("alarm:handle")
     @PutMapping("/{id}/handle")
     public Result<Void> handle(@PathVariable Long id,
                                @RequestBody Map<String, String> body,
@@ -185,7 +185,7 @@ public class AlarmController {
     /**
      * 批量处理/确认告警。
      */
-    @RequirePermission("alarm:read")
+    @RequirePermission("alarm:handle")
     @PutMapping("/batch/handle")
     public Result<Void> batchHandle(@RequestBody Map<String, Object> body,
                                     HttpServletRequest httpRequest) {

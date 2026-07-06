@@ -125,16 +125,12 @@ public class AuthController {
      * 记录审计日志。
      */
     private List<String> getEffectivePermissions(String roleCode, Long roleId) {
-        if (SUPER_ADMIN_ROLE.equals(roleCode)) {
-            return permissionService.getAllPermissionCodes();
-        }
+        // 所有角色统一从 role_permission 表动态查询（分配权限后即时生效）
         return permissionService.getPermissionCodesByRoleId(roleId);
     }
 
     private List<String> getEffectivePermissions(String roleCode) {
-        if (SUPER_ADMIN_ROLE.equals(roleCode)) {
-            return permissionService.getAllPermissionCodes();
-        }
+        // 所有角色统一从 role_permission 表动态查询
         return permissionService.getPermissionCodesByRoleCode(roleCode);
     }
 

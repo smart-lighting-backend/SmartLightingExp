@@ -127,9 +127,7 @@ public class JwtInterceptor implements HandlerInterceptor {
     }
 
     private List<String> getEffectivePermissions(String roleCode) {
-        if (SUPER_ADMIN_ROLE.equals(roleCode)) {
-            return permissionMapper.selectAllPermissionCodes();
-        }
+        // 所有角色统一从 role_permission 表动态查询（分配权限后即时生效）
         return permissionMapper.selectPermissionCodesByRoleCode(roleCode);
     }
 }

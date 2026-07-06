@@ -32,7 +32,8 @@ public class PermissionController {
     /** 前端 UI 未暴露操作的权限，不展示/返回给前端 */
     static final Set<String> HIDDEN_PERMISSION_CODES = Set.of(
             "menu:create", "menu:delete",
-            "permission:create", "permission:delete"
+            "permission:create", "permission:delete",
+            "role:read", "role:create", "role:delete"
     );
 
     /**

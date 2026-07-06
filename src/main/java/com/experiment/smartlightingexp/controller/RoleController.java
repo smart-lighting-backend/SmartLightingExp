@@ -36,6 +36,7 @@ public class RoleController {
 
     /**
      * 查询所有角色（含权限编码列表）。
+     * 用于权限分配页面的角色下拉选择，无需独立权限（属于 permission:read 范畴）。
      */
     @GetMapping
     public Result<List<Map<String, Object>>> getAll() {
@@ -58,6 +59,7 @@ public class RoleController {
 
     /**
      * 查询单个角色详情（含权限）。
+     * 用于权限分配页面加载角色详情和权限树，无需独立权限（属于 permission:read 范畴）。
      */
     @GetMapping("/{id}")
     public Result<Map<String, Object>> getById(@PathVariable Long id) {
@@ -88,6 +90,7 @@ public class RoleController {
     /**
      * 新增角色。
      */
+    @RequirePermission("role:create")
     @PostMapping
     public Result<Void> create(@RequestBody Role role,
                                HttpServletRequest httpRequest) {
@@ -114,6 +117,7 @@ public class RoleController {
     /**
      * 更新角色信息。
      */
+    @RequirePermission("role:update")
     @PutMapping("/{id}")
     public Result<Void> update(@PathVariable Long id,
                                @RequestBody Role role,
@@ -138,6 +142,7 @@ public class RoleController {
     /**
      * 删除角色。
      */
+    @RequirePermission("role:delete")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id,
                                HttpServletRequest httpRequest) {
