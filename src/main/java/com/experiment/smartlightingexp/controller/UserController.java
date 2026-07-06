@@ -12,6 +12,7 @@ import com.experiment.smartlightingexp.entity.Role;
 import com.experiment.smartlightingexp.entity.User;
 import com.experiment.smartlightingexp.mapper.AuditLogMapper;
 import com.experiment.smartlightingexp.mapper.RoleMapper;
+import com.experiment.smartlightingexp.mapper.UserMapper;
 import com.experiment.smartlightingexp.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,7 @@ import java.util.stream.Collectors;
 public class UserController {
 
     private final UserService userService;
+    private final UserMapper userMapper;
     private final RoleMapper roleMapper;
     private final AuditLogMapper auditLogMapper;
     private final PasswordEncoder passwordEncoder;
@@ -230,7 +232,33 @@ public class UserController {
     }
 
     /**
-     * 删除用户。
+     * 停用用户。
+     */
+    @RequirePermission("user:update")
+    @PutMapping("/{id}/disable")
+    public Result<Void> disable(@PathVariable Long id,
+                                HttpServletRequest httpRequest) {
+        User existing = userService.lambdaQuery()
+                .eq(User::getId, id)
+                .eq(User::getDeleted, false)
+                .one();
+        if (existing == null) {
+            saveAuditLog("USER_DISABLE", "USER", String.valueOf(id),
+                    "用户不存在-停用失败", "FAIL", httpRequest);
+            return Result.error("用户不存在");
+        }
+
+        existing.setEnabled(false);
+        userService.updateById(existing);
+
+        saveAuditLog("USER_DISABLE", "USER", String.valueOf(id),
+                "停用用户-" + existing.getUsername(), "SUCCESS", httpRequest);
+        log.info("[用户] 停用: id={}, username={}", id, existing.getUsername());
+        return Result.success();
+    }
+
+    /**
+     * 物理删除用户。
      */
     @RequirePermission("user:delete")
     @DeleteMapping("/{id}")
@@ -242,17 +270,20 @@ public class UserController {
                 .one();
         if (existing == null) {
             saveAuditLog("USER_DELETE", "USER", String.valueOf(id),
-                    "用户不存在-删除失败", "FAIL", httpRequest);
+                    "用户不存在-物理删除失败", "FAIL", httpRequest);
             return Result.error("用户不存在");
         }
 
-        existing.setDeleted(true);
-        existing.setEnabled(false);
-        userService.updateById(existing);
+        int deletedRows = userMapper.physicalDeleteById(id);
+        if (deletedRows == 0) {
+            saveAuditLog("USER_DELETE", "USER", String.valueOf(id),
+                    "物理删除用户失败-" + existing.getUsername(), "FAIL", httpRequest);
+            return Result.error("删除失败");
+        }
 
         saveAuditLog("USER_DELETE", "USER", String.valueOf(id),
-                "删除用户-" + existing.getUsername(), "SUCCESS", httpRequest);
-        log.info("[用户] 删除: id={}, username={}", id, existing.getUsername());
+                "物理删除用户-" + existing.getUsername(), "SUCCESS", httpRequest);
+        log.info("[用户] 物理删除: id={}, username={}", id, existing.getUsername());
         return Result.success();
     }
 
