@@ -15,6 +15,7 @@ import com.experiment.smartlightingexp.engine.DecisionEngine;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -51,7 +52,7 @@ public class MqttSubscriber {
             @Override
             public void messageArrived(String topic, org.eclipse.paho.client.mqttv3.MqttMessage message) {
                 try {
-                    String json = new String(message.getPayload());
+                    String json = new String(message.getPayload(), StandardCharsets.UTF_8);
                     String deviceId = topic.split("/")[1];
 
                     // 视觉事件

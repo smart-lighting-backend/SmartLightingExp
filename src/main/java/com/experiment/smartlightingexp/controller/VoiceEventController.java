@@ -7,6 +7,7 @@ import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.entity.VoiceEvent;
 import com.experiment.smartlightingexp.service.VoiceEventService;
+import com.experiment.smartlightingexp.util.EventTextNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -31,10 +32,12 @@ public class VoiceEventController {
             wrapper.eq(VoiceEvent::getDeviceId, deviceId);
         }
         if (type != null && !type.isBlank()) {
-            wrapper.eq(VoiceEvent::getType, type);
+            wrapper.in(VoiceEvent::getType, EventTextNormalizer.queryValues(type));
         }
         wrapper.orderByDesc(VoiceEvent::getOccurredAt);
-        return Result.success(voiceEventService.page(new Page<>(page, size), wrapper));
+        IPage<VoiceEvent> result = voiceEventService.page(new Page<>(page, size), wrapper);
+        result.getRecords().forEach(EventTextNormalizer::normalizeVoiceEvent);
+        return Result.success(result);
     }
 
     @RequirePermission("events:read")
@@ -46,6 +49,8 @@ public class VoiceEventController {
         LambdaQueryWrapper<VoiceEvent> wrapper = new LambdaQueryWrapper<VoiceEvent>()
                 .eq(VoiceEvent::getDeviceId, deviceId)
                 .orderByDesc(VoiceEvent::getOccurredAt);
-        return Result.success(voiceEventService.page(new Page<>(page, size), wrapper));
+        IPage<VoiceEvent> result = voiceEventService.page(new Page<>(page, size), wrapper);
+        result.getRecords().forEach(EventTextNormalizer::normalizeVoiceEvent);
+        return Result.success(result);
     }
 }

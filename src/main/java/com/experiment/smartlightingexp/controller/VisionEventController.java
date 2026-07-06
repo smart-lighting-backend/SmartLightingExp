@@ -7,11 +7,10 @@ import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.entity.VisionEvent;
 import com.experiment.smartlightingexp.service.VisionEventService;
+import com.experiment.smartlightingexp.util.EventTextNormalizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDateTime;
 
 @Slf4j
 @RestController
@@ -33,10 +32,12 @@ public class VisionEventController {
             wrapper.eq(VisionEvent::getDeviceId, deviceId);
         }
         if (eventType != null && !eventType.isBlank()) {
-            wrapper.eq(VisionEvent::getEventType, eventType);
+            wrapper.in(VisionEvent::getEventType, EventTextNormalizer.queryValues(eventType));
         }
         wrapper.orderByDesc(VisionEvent::getOccurredAt);
-        return Result.success(visionEventService.page(new Page<>(page, size), wrapper));
+        IPage<VisionEvent> result = visionEventService.page(new Page<>(page, size), wrapper);
+        result.getRecords().forEach(EventTextNormalizer::normalizeVisionEvent);
+        return Result.success(result);
     }
 
     @RequirePermission("events:read")
@@ -48,6 +49,8 @@ public class VisionEventController {
         LambdaQueryWrapper<VisionEvent> wrapper = new LambdaQueryWrapper<VisionEvent>()
                 .eq(VisionEvent::getDeviceId, deviceId)
                 .orderByDesc(VisionEvent::getOccurredAt);
-        return Result.success(visionEventService.page(new Page<>(page, size), wrapper));
+        IPage<VisionEvent> result = visionEventService.page(new Page<>(page, size), wrapper);
+        result.getRecords().forEach(EventTextNormalizer::normalizeVisionEvent);
+        return Result.success(result);
     }
 }

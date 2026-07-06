@@ -10,6 +10,7 @@ import com.experiment.smartlightingexp.dto.*;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.service.*;
+import com.experiment.smartlightingexp.util.EventTextNormalizer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -636,7 +637,7 @@ public class DeviceController {
                         .orderByDesc(VisionEvent::getOccurredAt).last("LIMIT 1"));
         if (ve != null) {
             Map<String, Object> veMap = new LinkedHashMap<>();
-            veMap.put("eventType", ve.getEventType());
+            veMap.put("eventType", EventTextNormalizer.normalize(ve.getEventType()));
             veMap.put("confidence", ve.getConfidence());
             veMap.put("snapshotRef", ve.getSnapshotRef());
             veMap.put("occurredAt", ve.getOccurredAt() != null ? ve.getOccurredAt().toString() : null);
@@ -652,9 +653,9 @@ public class DeviceController {
                         .orderByDesc(VoiceEvent::getOccurredAt).last("LIMIT 1"));
         if (vo != null) {
             Map<String, Object> voMap = new LinkedHashMap<>();
-            voMap.put("type", vo.getType());
-            voMap.put("content", vo.getContent());
-            voMap.put("source", vo.getSource());
+            voMap.put("type", EventTextNormalizer.normalize(vo.getType()));
+            voMap.put("content", EventTextNormalizer.normalize(vo.getContent()));
+            voMap.put("source", EventTextNormalizer.normalize(vo.getSource()));
             voMap.put("occurredAt", vo.getOccurredAt() != null ? vo.getOccurredAt().toString() : null);
             result.put("latestVoice", voMap);
         } else {
