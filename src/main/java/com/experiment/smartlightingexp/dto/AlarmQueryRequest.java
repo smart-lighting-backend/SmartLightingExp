@@ -1,5 +1,7 @@
 package com.experiment.smartlightingexp.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -9,6 +11,7 @@ import java.time.LocalDateTime;
  * 告警查询请求 DTO — 支持按设备、类型、级别、状态、时间范围和处理人组合筛选。
  */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class AlarmQueryRequest {
 
     /** 设备ID（模糊匹配） */
@@ -38,7 +41,8 @@ public class AlarmQueryRequest {
     @JsonProperty("pageNum")
     private int page = 1;
 
-    /** 每页条数，默认 20 */
+    /** 每页条数，默认 20（兼容 size / pageSize） */
     @JsonProperty("pageSize")
+    @JsonAlias({"size"})
     private int size = 20;
 }

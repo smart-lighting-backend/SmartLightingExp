@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -9,6 +10,7 @@ import java.math.BigDecimal;
  * 设备查询请求 DTO — 支持多条件组合筛选 + 分页。
  */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class DeviceQueryRequest {
 
     /** 设备编号（精确匹配） */
