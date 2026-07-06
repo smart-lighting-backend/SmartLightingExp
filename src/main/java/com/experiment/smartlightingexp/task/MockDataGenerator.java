@@ -127,7 +127,7 @@ public class MockDataGenerator {
                 hb.put("timestamp", now.toString());
                 String json = objectMapper.writeValueAsString(hb);
                 String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/heartbeat";
-                mqttPublisher.publish(topic, json, 0);
+                mqttPublisher.publish(topic, json, 1);
                 count++;
             } catch (Exception e) {
                 log.error("心跳发布失败 [{}]: {}", device.getDeviceId(), e.getMessage());

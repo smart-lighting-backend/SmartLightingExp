@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -8,6 +9,7 @@ import java.time.LocalDateTime;
  * 遥测数据查询请求 DTO — 支持按设备、时间范围组合筛选 + 分页。
  */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class TelemetryQueryRequest {
 
     /** 设备ID（精确匹配） */

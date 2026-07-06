@@ -31,4 +31,20 @@ public interface AlarmRecordService extends IService<AlarmRecord> {
      * @param deviceId 设备编号
      */
     void resolveOfflineAlarm(String deviceId);
+
+    /**
+     * 查询指定设备是否存在 ACTIVE 状态的 HEALTH_LOW 告警。
+     *
+     * @param deviceId 设备编号
+     * @return 告警记录，或 null
+     */
+    AlarmRecord findActiveHealthAlarm(String deviceId);
+
+    /**
+     * 恢复指定设备的 HEALTH_LOW 告警（置为 RECOVERED）。
+     * 若设备有 ACTIVE 的健康分过低告警，自动关闭。
+     *
+     * @param deviceId 设备编号
+     */
+    void resolveHealthAlarm(String deviceId);
 }

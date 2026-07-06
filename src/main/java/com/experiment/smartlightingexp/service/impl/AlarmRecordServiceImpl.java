@@ -150,6 +150,27 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
         }
     }
 
+    @Override
+    public AlarmRecord findActiveHealthAlarm(String deviceId) {
+        return alarmRecordMapper.selectOne(
+                Wrappers.<AlarmRecord>lambdaQuery()
+                        .eq(AlarmRecord::getDeviceId, deviceId)
+                        .eq(AlarmRecord::getType, "HEALTH_LOW")
+                        .eq(AlarmRecord::getStatus, ALARM_STATUS_ACTIVE)
+                        .last("LIMIT 1"));
+    }
+
+    @Override
+    public void resolveHealthAlarm(String deviceId) {
+        AlarmRecord alarm = findActiveHealthAlarm(deviceId);
+        if (alarm != null) {
+            alarm.setStatus(ALARM_STATUS_RECOVERED);
+            alarm.setRecoverAt(LocalDateTime.now());
+            alarmRecordMapper.updateById(alarm);
+            log.info("[{}] HEALTH_LOW alarm resolved (id={})", deviceId, alarm.getId());
+        }
+    }
+
     private String buildOfflineReason(LocalDateTime lastHeartbeatAt) {
         if (lastHeartbeatAt == null) {
             return "No heartbeat reported, judged offline";

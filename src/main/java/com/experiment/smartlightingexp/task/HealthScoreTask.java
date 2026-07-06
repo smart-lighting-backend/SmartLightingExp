@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.task;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
+import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -23,17 +24,24 @@ import java.util.*;
  *   ② 通信质量 (25%) — telemetry 近 24h 上报间隔标准差
  *   ③ 指令响应率 (25%) — control_command 近 7 天 ACK 率
  *   ④ 传感器异常率 (20%) — latestData 各字段是否在合理范围
+ *
+ * 健康分低于阈值 (60) 时自动产生 HEALTH_LOW 告警，回升后自动恢复。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class HealthScoreTask {
 
+    private static final int HEALTH_THRESHOLD = 60;
+    private static final String ALARM_TYPE_HEALTH = "HEALTH_LOW";
+    private static final String ALARM_LEVEL_WARNING = "WARNING";
+
     private final DeviceMapper deviceMapper;
     private final AlarmRecordMapper alarmRecordMapper;
     private final TelemetryMapper telemetryMapper;
     private final ControlCommandMapper controlCommandMapper;
     private final ObjectMapper objectMapper;
+    private final AlarmRecordService alarmRecordService;
 
     private final Random random = new Random();
 
@@ -73,6 +81,24 @@ public class HealthScoreTask {
 
                 device.setHealthScore(BigDecimal.valueOf(total));
                 deviceMapper.updateById(device);
+
+                // 健康分告警：低于阈值产生（去重），回升则自动恢复
+                if (total < HEALTH_THRESHOLD) {
+                    if (alarmRecordService.findActiveHealthAlarm(device.getDeviceId()) == null) {
+                        AlarmRecord alarm = new AlarmRecord();
+                        alarm.setDeviceId(device.getDeviceId());
+                        alarm.setType(ALARM_TYPE_HEALTH);
+                        alarm.setLevel(ALARM_LEVEL_WARNING);
+                        alarm.setStatus("ACTIVE");
+                        alarm.setReason("健康分降至 " + total + "，低于阈值 " + HEALTH_THRESHOLD);
+                        alarm.setStartAt(LocalDateTime.now());
+                        alarmRecordMapper.insert(alarm);
+                        log.warn("[{}] HEALTH_LOW alarm created (score={})", device.getDeviceId(), total);
+                    }
+                } else {
+                    alarmRecordService.resolveHealthAlarm(device.getDeviceId());
+                }
+
                 count++;
             } catch (Exception e) {
                 log.error("健康分计算失败 [{}]: {}", device.getDeviceId(), e.getMessage());
