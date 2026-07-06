@@ -40,6 +40,7 @@ public class AuthController {
     private final AuditLogService auditLogService;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
+    private static final String SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 
     /**
      * 用户登录 — 校验用户名密码，签发 JWT。
@@ -74,7 +75,7 @@ public class AuthController {
             return Result.error(500, "用户角色配置异常");
         }
 
-        List<String> permissions = permissionService.getPermissionCodesByRoleId(user.getRoleId());
+        List<String> permissions = getEffectivePermissions(role.getRoleCode(), user.getRoleId());
 
         // 4. 查询可见菜单
         List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
@@ -114,7 +115,7 @@ public class AuthController {
         String username = jwtUtil.extractSubject(token);
         String roleCode = jwtUtil.extractRoleCode(token);
         // 从数据库动态查询权限（Token 中的已是旧数据，分配权限后新 Token 才能更新）
-        List<String> permissions = permissionService.getPermissionCodesByRoleCode(roleCode);
+        List<String> permissions = getEffectivePermissions(roleCode);
         List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
 
         return Result.success(new LoginResponse(token, username, roleCode, permissions, menus));
@@ -123,6 +124,20 @@ public class AuthController {
     /**
      * 记录审计日志。
      */
+    private List<String> getEffectivePermissions(String roleCode, Long roleId) {
+        if (SUPER_ADMIN_ROLE.equals(roleCode)) {
+            return permissionService.getAllPermissionCodes();
+        }
+        return permissionService.getPermissionCodesByRoleId(roleId);
+    }
+
+    private List<String> getEffectivePermissions(String roleCode) {
+        if (SUPER_ADMIN_ROLE.equals(roleCode)) {
+            return permissionService.getAllPermissionCodes();
+        }
+        return permissionService.getPermissionCodesByRoleCode(roleCode);
+    }
+
     private void auditLog(String operator, String action, String targetType,
                           String targetId, String detail, String result, String ip) {
         try {

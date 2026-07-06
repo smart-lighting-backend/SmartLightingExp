@@ -24,6 +24,11 @@ public class PermissionServiceImpl extends ServiceImpl<PermissionMapper, Permiss
     }
 
     @Override
+    public List<String> getAllPermissionCodes() {
+        return permissionMapper.selectAllPermissionCodes();
+    }
+
+    @Override
     public List<String> getPermissionCodesByRoleCode(String roleCode) {
         return permissionMapper.selectPermissionCodesByRoleCode(roleCode);
     }

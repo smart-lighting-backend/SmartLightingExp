@@ -22,6 +22,14 @@ public interface PermissionMapper extends BaseMapper<Permission> {
     List<String> selectPermissionCodesByRoleId(Long roleId);
 
     /**
+     * 查询当前系统已注册的全部权限编码（用于 SUPER_ADMIN 生效权限）。
+     */
+    @Select("SELECT p.permission_code FROM permission p " +
+            "WHERE p.permission_code IS NOT NULL " +
+            "ORDER BY p.id")
+    List<String> selectAllPermissionCodes();
+
+    /**
      * 根据角色编码查询该角色拥有的所有权限编码（动态查询，Token 中的已是旧数据）。
      */
     @Select("SELECT p.permission_code FROM permission p " +

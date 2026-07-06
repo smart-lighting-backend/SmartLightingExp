@@ -29,6 +29,7 @@ public class JwtInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final PermissionMapper permissionMapper;
+    private static final String SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 
     /**
      * 白名单路径前缀 — 匹配开头即放行。
@@ -76,7 +77,7 @@ public class JwtInterceptor implements HandlerInterceptor {
         // 4. 从 Token 中解析基础信息，但权限从数据库动态查询（分配权限后即时生效）
         String username = jwtUtil.extractSubject(token);
         String roleCode = jwtUtil.extractRoleCode(token);
-        List<String> permissions = permissionMapper.selectPermissionCodesByRoleCode(roleCode);
+        List<String> permissions = getEffectivePermissions(roleCode);
 
         SecurityContext.setCurrentUser(
                 new SecurityContext.UserInfo(username, roleCode, permissions));
@@ -123,5 +124,12 @@ public class JwtInterceptor implements HandlerInterceptor {
      */
     private boolean isWhiteListed(String path) {
         return WHITE_LIST.stream().anyMatch(path::startsWith);
+    }
+
+    private List<String> getEffectivePermissions(String roleCode) {
+        if (SUPER_ADMIN_ROLE.equals(roleCode)) {
+            return permissionMapper.selectAllPermissionCodes();
+        }
+        return permissionMapper.selectPermissionCodesByRoleCode(roleCode);
     }
 }
