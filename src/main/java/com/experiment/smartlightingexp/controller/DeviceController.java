@@ -443,14 +443,16 @@ public class DeviceController {
                 .eq(Device::getDeviceId, deviceId).eq(Device::getDeleted, false).one();
         if (device == null) return Result.error("设备不存在");
 
-        // 健康总分使用已存储的 health_score，与设备列表/详情页保持一致
-        int overallScore = device.getHealthScore() != null ? device.getHealthScore().intValue() : 0;
-
-        // 四个维度仍实时计算，展示诊断细节（权重与 HealthScoreTask 一致）
+        // 四个维度实时计算（权重与 HealthScoreTask 一致）
         int offline = calcOffline(deviceId);
         int comm = calcComm(deviceId);
         int response = calcResponse(deviceId);
         int sensor = calcSensor(device);
+
+        // 总分 = 维度加权平均（与定时任务一致，保持数据实时性）
+        int overallScore = (int) Math.round(
+            0.30 * offline + 0.25 * comm + 0.25 * response + 0.20 * sensor
+        );
 
         String level;
         String color;

@@ -37,8 +37,24 @@ public class HealthScoreTask {
 
     private final Random random = new Random();
 
+    /**
+     * 每日凌晨 2:00 全量计算健康分（深度诊断）。
+     */
     @Scheduled(cron = "0 0 2 * * ?")
-    public void computeAll() {
+    public void computeAllDaily() {
+        computeAll();
+    }
+
+    /**
+     * 每 30 分钟增量刷新健康分（启动后 2 分钟首次执行），
+     * 确保列表页 health_score 不会因定时周期过长而陈旧。
+     */
+    @Scheduled(fixedRate = 30 * 60 * 1000, initialDelay = 2 * 60 * 1000)
+    public void computeAllPeriodic() {
+        computeAll();
+    }
+
+    private void computeAll() {
         List<Device> devices = deviceMapper.selectList(
                 new LambdaQueryWrapper<Device>()
                         .eq(Device::getEnabled, true)
