@@ -6,13 +6,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
-import com.experiment.smartlightingexp.dto.DeviceQueryRequest;
+import com.experiment.smartlightingexp.dto.*;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.service.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +23,7 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 设备管理控制器 — 设备增删改查 + 组合条件分页查询。
@@ -35,6 +37,7 @@ public class DeviceController {
 
     private final DeviceService deviceService;
     private final AuditLogMapper auditLogMapper;
+    private final DeviceAreaMapper deviceAreaMapper;
 
     /**
      * 组合条件分页查询设备列表。
@@ -55,6 +58,9 @@ public class DeviceController {
         }
         if (request.getArea() != null && !request.getArea().isBlank()) {
             wrapper.eq(Device::getArea, request.getArea());
+        }
+        if (request.getAreaId() != null) {
+            wrapper.eq(Device::getAreaId, request.getAreaId());
         }
         if (request.getLocation() != null && !request.getLocation().isBlank()) {
             wrapper.like(Device::getLocation, request.getLocation());
@@ -95,6 +101,7 @@ public class DeviceController {
             @RequestParam(defaultValue = "10") long pageSize,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String area,
+            @RequestParam(required = false) Long areaId,
             @RequestParam(required = false) Integer status,
             @RequestParam(required = false) Boolean enabled) {
 
@@ -115,6 +122,9 @@ public class DeviceController {
         }
         if (area != null && !area.isBlank()) {
             wrapper.eq(Device::getArea, area);
+        }
+        if (areaId != null) {
+            wrapper.eq(Device::getAreaId, areaId);
         }
         if (status != null) {
             wrapper.eq(Device::getStatus, status);
@@ -173,6 +183,14 @@ public class DeviceController {
         if (device.getEnabled() == null) device.setEnabled(true);
         if (device.getHealthScore() == null) device.setHealthScore(new BigDecimal("100.00"));
         if (device.getTopicPrefix() == null || device.getTopicPrefix().isBlank()) device.setTopicPrefix("streetlight");
+        // areaId 优先：自动填充区域名
+        if (device.getAreaId() != null) {
+            DeviceArea area = deviceAreaMapper.selectById(device.getAreaId());
+            if (area != null) {
+                device.setAreaId(area.getId());
+                device.setArea(area.getName());
+            }
+        }
         device.setDeleted(false);
         deviceService.save(device);
 
@@ -279,6 +297,13 @@ public class DeviceController {
         // 只更新允许修改的字段
         if (device.getName() != null) existing.setName(device.getName());
         if (device.getArea() != null) existing.setArea(device.getArea());
+        if (device.getAreaId() != null) {
+            DeviceArea area = deviceAreaMapper.selectById(device.getAreaId());
+            if (area != null) {
+                existing.setAreaId(area.getId());
+                existing.setArea(area.getName());
+            }
+        }
         if (device.getLocation() != null) existing.setLocation(device.getLocation());
         if (device.getStatus() != null) existing.setStatus(device.getStatus());
         if (device.getHealthScore() != null) existing.setHealthScore(device.getHealthScore());
@@ -298,6 +323,39 @@ public class DeviceController {
                 "更新设备-" + existing.getName(), "SUCCESS", httpRequest);
         log.info("[设备] 更新: deviceId={}, name={}", deviceId, existing.getName());
         return Result.success(updated);
+    }
+
+    /**
+     * 批量分配设备区域。
+     */
+    @RequirePermission("device:update")
+    @PutMapping("/batch-area")
+    public Result<Void> batchUpdateArea(@RequestBody @Valid BatchAreaRequest request,
+                                        HttpServletRequest httpRequest) {
+        if (request.getDeviceIds().isEmpty()) {
+            return Result.error(400, "设备ID列表不能为空");
+        }
+
+        // 解析区域名
+        String areaName = null;
+        if (request.getAreaId() != null) {
+            DeviceArea area = deviceAreaMapper.selectById(request.getAreaId());
+            if (area == null) {
+                return Result.error(404, "区域不存在");
+            }
+            areaName = area.getName();
+        }
+
+        // 去重
+        List<Long> ids = request.getDeviceIds().stream()
+                .distinct().collect(Collectors.toList());
+
+        deviceService.batchUpdateArea(ids, request.getAreaId(), areaName);
+
+        saveAuditLog("DEVICE_BATCH_AREA", "DEVICE", ids.toString(),
+                "批量分配区域" + (areaName != null ? "-" + areaName : "-清除"), "SUCCESS", httpRequest);
+        log.info("[设备] 批量分配区域: 设备数={}, areaId={}", ids.size(), request.getAreaId());
+        return Result.success();
     }
 
     /**

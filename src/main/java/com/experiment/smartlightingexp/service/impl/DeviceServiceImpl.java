@@ -9,19 +9,26 @@ import com.experiment.smartlightingexp.dto.DeviceCreateRequest;
 import com.experiment.smartlightingexp.dto.DevicePageRequest;
 import com.experiment.smartlightingexp.dto.DeviceUpdateRequest;
 import com.experiment.smartlightingexp.entity.Device;
+import com.experiment.smartlightingexp.entity.DeviceArea;
+import com.experiment.smartlightingexp.mapper.DeviceAreaMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.service.DeviceService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * Device service implementation for device ledger management.
  */
 @Service
+@RequiredArgsConstructor
 public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> implements DeviceService {
+
+    private final DeviceAreaMapper deviceAreaMapper;
 
     private static final long MAX_PAGE_SIZE = 100L;
     private static final int DEVICE_STATUS_DISABLED = 0;
@@ -45,7 +52,16 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
         Device device = new Device();
         device.setDeviceId(deviceId);
         device.setName(normalizeText(request.getName()));
-        device.setArea(normalizeText(request.getArea()));
+        // areaId 优先：设置了 areaId 则自动填充区域名
+        if (request.getAreaId() != null) {
+            DeviceArea area = deviceAreaMapper.selectById(request.getAreaId());
+            if (area != null) {
+                device.setAreaId(area.getId());
+                device.setArea(area.getName());
+            }
+        } else if (request.getArea() != null) {
+            device.setArea(normalizeText(request.getArea()));
+        }
         device.setLocation(normalizeText(request.getLocation()));
         device.setStatus(request.getStatus() == null ? DEVICE_STATUS_ONLINE : request.getStatus());
         device.setHealthScore(request.getHealthScore() == null ? DEFAULT_HEALTH_SCORE : request.getHealthScore());
@@ -70,6 +86,13 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
         }
         if (request.getArea() != null) {
             update.setArea(normalizeText(request.getArea()));
+        }
+        if (request.getAreaId() != null) {
+            DeviceArea area = deviceAreaMapper.selectById(request.getAreaId());
+            if (area != null) {
+                update.setAreaId(area.getId());
+                update.setArea(area.getName());
+            }
         }
         if (request.getLocation() != null) {
             update.setLocation(normalizeText(request.getLocation()));
@@ -129,6 +152,9 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
         if (StringUtils.hasText(request.getArea())) {
             wrapper.eq(Device::getArea, request.getArea().trim());
         }
+        if (request.getAreaId() != null) {
+            wrapper.eq(Device::getAreaId, request.getAreaId());
+        }
         if (request.getStatus() != null) {
             wrapper.eq(Device::getStatus, request.getStatus());
         }
@@ -138,6 +164,16 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
 
         wrapper.orderByAsc(Device::getArea).orderByAsc(Device::getDeviceId);
         return page(new Page<>(pageNum, pageSize), wrapper);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchUpdateArea(List<Long> deviceIds, Long areaId, String areaName) {
+        update(new LambdaUpdateWrapper<Device>()
+                .in(Device::getId, deviceIds)
+                .eq(Device::getDeleted, false)
+                .set(Device::getAreaId, areaId)
+                .set(Device::getArea, areaName));
     }
 
     private Device getActiveDevice(String deviceId) {

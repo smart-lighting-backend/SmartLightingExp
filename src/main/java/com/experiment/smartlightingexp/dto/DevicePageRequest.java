@@ -11,7 +11,11 @@ public class DevicePageRequest {
 
     private String keyword;
 
+    /** 区域名称（文本匹配） */
     private String area;
+
+    /** 关联 device_area.id */
+    private Long areaId;
 
     private Integer status;
 

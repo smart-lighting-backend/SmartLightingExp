@@ -21,7 +21,11 @@ public class Device {
 
     private String name;
 
+    /** 区域名称（冗余展示字段，由 area_id 自动填充） */
     private String area;
+
+    /** 关联 device_area.id */
+    private Long areaId;
 
     private String location;
 

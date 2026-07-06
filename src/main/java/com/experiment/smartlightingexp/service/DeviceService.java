@@ -7,6 +7,8 @@ import com.experiment.smartlightingexp.dto.DevicePageRequest;
 import com.experiment.smartlightingexp.dto.DeviceUpdateRequest;
 import com.experiment.smartlightingexp.entity.Device;
 
+import java.util.List;
+
 /**
  * 设备 Service — 设备台账的业务逻辑接口。
  */
@@ -21,4 +23,7 @@ public interface DeviceService extends IService<Device> {
     Device getDeviceDetail(String deviceId);
 
     Page<Device> pageDevices(DevicePageRequest request);
+
+    /** 批量更新设备区域 */
+    void batchUpdateArea(List<Long> deviceIds, Long areaId, String areaName);
 }

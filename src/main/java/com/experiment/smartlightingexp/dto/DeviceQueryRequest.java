@@ -17,8 +17,11 @@ public class DeviceQueryRequest {
     /** 设备名称（模糊匹配） */
     private String name;
 
-    /** 区域（精确匹配） */
+    /** 区域（精确匹配文本） */
     private String area;
+
+    /** 关联 device_area.id */
+    private Long areaId;
 
     /** 安装位置（模糊匹配） */
     private String location;

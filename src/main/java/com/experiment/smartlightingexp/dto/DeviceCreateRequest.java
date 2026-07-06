@@ -17,7 +17,11 @@ public class DeviceCreateRequest {
 
     private String name;
 
+    /** 区域名称（自由文本，兼容旧版，建议使用 areaId） */
     private String area;
+
+    /** 关联 device_area.id */
+    private Long areaId;
 
     private String location;
 
