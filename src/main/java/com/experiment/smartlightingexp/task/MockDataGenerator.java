@@ -49,10 +49,7 @@ public class MockDataGenerator {
                 .eq(Device::getEnabled, true)
                 .eq(Device::getDeleted, false);
         List<Device> devices = deviceMapper.selectList(query);
-        log.info("===== Mock Data Generation =====");
-        log.info("Enabled devices found: {}", devices.size());
         if (devices.isEmpty()) {
-            log.warn("No devices available, skip generation");
             return;
         }
 
@@ -80,13 +77,10 @@ public class MockDataGenerator {
             try {
                 String json = objectMapper.writeValueAsString(data);
                 String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/telemetry";
-                mqttPublisher.publish(topic, json, 1);
-                log.info("  [{}] → illuminance={}, temp={}°C, humidity={}%, pm25={}, aqi={}, pir={}, traffic={}",
-                        device.getDeviceId(), illuminance,
-                        String.format("%.1f", temperature), humidity, pm25, aqi, pir, trafficFlow);
+                mqttPublisher.publish(topic, json, 0);
                 successCount++;
             } catch (Exception e) {
-                log.error("  [{}] ✗ publish failed: {}", device.getDeviceId(), e.getMessage());
+                log.error("遥测发布失败 [{}]: {}", device.getDeviceId(), e.getMessage());
             }
 
             // 视觉事件生成：基于传感器数据触发
@@ -106,8 +100,7 @@ public class MockDataGenerator {
                 publishVoiceEvent(device.getDeviceId());
             }
         }
-        log.info("Result: {}/{} published", successCount, devices.size());
-        log.info("================================");
+        log.info("Mock遥测: {}/{} 台设备已发布", successCount, devices.size());
 
         simulateAcks(devices);
     }
@@ -134,13 +127,12 @@ public class MockDataGenerator {
                 hb.put("timestamp", now.toString());
                 String json = objectMapper.writeValueAsString(hb);
                 String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/heartbeat";
-                mqttPublisher.publish(topic, json, 1);
+                mqttPublisher.publish(topic, json, 0);
                 count++;
             } catch (Exception e) {
-                log.error("  [{}] ✗ heartbeat publish failed: {}", device.getDeviceId(), e.getMessage());
+                log.error("心跳发布失败 [{}]: {}", device.getDeviceId(), e.getMessage());
             }
         }
-        log.debug("Heartbeat simulation: {}/{} devices", count, devices.size());
     }
 
     /** 模拟设备回复 ACK：查询最近 10 分钟内无确认的指令，以 90% 概率确认。 */
@@ -161,16 +153,13 @@ public class MockDataGenerator {
                         ack.put("completedAt", LocalDateTime.now().toString());
                         String json = objectMapper.writeValueAsString(ack);
                         String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/command/ack";
-                        mqttPublisher.publish(topic, json, 1);
+                        mqttPublisher.publish(topic, json, 0);
                         ackCount++;
                     } catch (Exception e) {
-                        log.error("  [{}] ✗ ACK publish failed: {}", device.getDeviceId(), e.getMessage());
+                        log.error("ACK发布失败 [{}]: {}", device.getDeviceId(), e.getMessage());
                     }
                 }
             }
-        }
-        if (ackCount > 0) {
-            log.info("ACK simulation: {} commands acknowledged", ackCount);
         }
     }
 
@@ -184,10 +173,9 @@ public class MockDataGenerator {
             event.put("occurredAt", LocalDateTime.now().toString());
             String json = objectMapper.writeValueAsString(event);
             String topic = mqttProperties.getTopicPrefix() + "/" + deviceId + "/vision/event";
-            mqttPublisher.publish(topic, json, 1);
-            log.info("  [{}] 👁 vision event: {}", deviceId, eventType);
+            mqttPublisher.publish(topic, json, 0);
         } catch (Exception e) {
-            log.error("  [{}] ✗ vision event publish failed: {}", deviceId, e.getMessage());
+            log.error("视觉事件发布失败 [{}]: {}", deviceId, e.getMessage());
         }
     }
 
@@ -215,10 +203,9 @@ public class MockDataGenerator {
             event.put("occurredAt", LocalDateTime.now().toString());
             String json = objectMapper.writeValueAsString(event);
             String topic = mqttProperties.getTopicPrefix() + "/" + deviceId + "/voice/event";
-            mqttPublisher.publish(topic, json, 1);
-            log.info("  [{}] 🔊 voice event: {} — {}", deviceId, type, content);
+            mqttPublisher.publish(topic, json, 0);
         } catch (Exception e) {
-            log.error("  [{}] ✗ voice event publish failed: {}", deviceId, e.getMessage());
+            log.error("语音事件发布失败 [{}]: {}", deviceId, e.getMessage());
         }
     }
 }

@@ -60,8 +60,8 @@ public class HealthScoreTask {
                         .eq(Device::getEnabled, true)
                         .eq(Device::getDeleted, false));
         if (devices.isEmpty()) return;
-        log.info("===== Health Score Computation: {} devices =====", devices.size());
 
+        int count = 0;
         for (Device device : devices) {
             try {
                 int offlineScore   = calcOfflineScore(device.getDeviceId());
@@ -73,13 +73,12 @@ public class HealthScoreTask {
 
                 device.setHealthScore(BigDecimal.valueOf(total));
                 deviceMapper.updateById(device);
-                log.info("  [{}] healthScore={} (offline={}, comm={}, response={}, sensor={})",
-                        device.getDeviceId(), total, offlineScore, commScore, responseScore, sensorScore);
+                count++;
             } catch (Exception e) {
-                log.error("  [{}] health score compute failed: {}", device.getDeviceId(), e.getMessage());
+                log.error("健康分计算失败 [{}]: {}", device.getDeviceId(), e.getMessage());
             }
         }
-        log.info("===== Health Score Computation Finished =====");
+        log.info("健康分计算完成: {}/{} 台设备", count, devices.size());
     }
 
     // ───────────── 维度 1：离线频次 (30%) ─────────────

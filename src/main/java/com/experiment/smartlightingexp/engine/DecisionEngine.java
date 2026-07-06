@@ -47,7 +47,7 @@ public class DecisionEngine {
      * 由 MqttSubscriber 在收到新遥测后调用。
      */
     public void evaluate(String deviceId, Telemetry telemetry) {
-        log.info("[{}] DecisionEngine evaluate: lux={}, pir={}", deviceId,
+        log.debug("[{}] DecisionEngine: lux={}, pir={}", deviceId,
                 telemetry.getIlluminance(), telemetry.getPir());
 
         // 1. 获取设备信息，检查手动锁定
@@ -121,7 +121,7 @@ public class DecisionEngine {
             cmdPayload.put("source", "AUTO");
             cmdPayload.put("reason", "策略引擎: " + policyName);
             String payload = objectMapper.writeValueAsString(cmdPayload);
-            mqttPublisher.publish("streetlight/" + deviceId + "/command", payload, 1);
+            mqttPublisher.publish("streetlight/" + deviceId + "/command", payload, 0);
 
             // 2. 记录 control_command
             ControlCommand cmd = new ControlCommand();
@@ -149,33 +149,28 @@ public class DecisionEngine {
                             .eq(LightingPolicy::getName, policyName)
                             .eq(LightingPolicy::getDeleted, false));
             if (matched != null && matched.getConditions() != null) {
-                try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> conds = objectMapper.readValue(matched.getConditions(), Map.class);
+                Object extra = conds.get("extraActions");
+                if (extra instanceof Map) {
                     @SuppressWarnings("unchecked")
-                    Map<String, Object> conds = objectMapper.readValue(matched.getConditions(), Map.class);
-                    Object extra = conds.get("extraActions");
-                    if (extra instanceof Map) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> extraActions = (Map<String, Object>) extra;
-                        if (Boolean.TRUE.equals(extraActions.get("voiceAlert"))) {
-                            com.experiment.smartlightingexp.entity.VoiceEvent ve =
-                                    new com.experiment.smartlightingexp.entity.VoiceEvent();
-                            ve.setDeviceId(deviceId);
-                            ve.setType("警告");
-                            ve.setContent("策略触发: " + policyName + " → " + action);
-                            ve.setSource("自动");
-                            ve.setOccurredAt(LocalDateTime.now());
-                            voiceEventMapper.insert(ve);
-                            log.info("[{}] 🔊 Voice event from policy: {}", deviceId, policyName);
-                        }
+                    Map<String, Object> extraActions = (Map<String, Object>) extra;
+                    if (Boolean.TRUE.equals(extraActions.get("voiceAlert"))) {
+                        com.experiment.smartlightingexp.entity.VoiceEvent ve =
+                                new com.experiment.smartlightingexp.entity.VoiceEvent();
+                        ve.setDeviceId(deviceId);
+                        ve.setType("警告");
+                        ve.setContent("策略触发: " + policyName + " → " + action);
+                        ve.setSource("自动");
+                        ve.setOccurredAt(LocalDateTime.now());
+                        voiceEventMapper.insert(ve);
                     }
-                } catch (Exception ex) {
-                    log.warn("[{}] Failed to parse extraActions for voice alert: {}", deviceId, ex.getMessage());
                 }
             }
 
-            log.info("[{}] Auto control → {} (policy={})", deviceId, action, policyName);
+            log.info("自动控制 [{}]: {} (策略={})", deviceId, action, policyName);
         } catch (Exception e) {
-            log.error("[{}] DecisionEngine executeAction failed: {}", deviceId, e.getMessage());
+            log.error("决策引擎执行失败 [{}]: {}", deviceId, e.getMessage());
             // 记录失败的 control_command
             try {
                 ControlCommand failedCmd = new ControlCommand();
@@ -187,7 +182,6 @@ public class DecisionEngine {
                 failedCmd.setResultDetail("MQTT下发失败-" + e.getMessage());
                 controlCommandMapper.insert(failedCmd);
             } catch (Exception ex) {
-                log.warn("[{}] Failed to persist failed control_command: {}", deviceId, ex.getMessage());
             }
             // 记录失败的 decision_log
             try {
@@ -199,7 +193,6 @@ public class DecisionEngine {
                 failedLog.setResult("MATCH_FAILED");
                 decisionLogMapper.insert(failedLog);
             } catch (Exception ex) {
-                log.warn("[{}] Failed to persist failed decision_log: {}", deviceId, ex.getMessage());
             }
         }
     }

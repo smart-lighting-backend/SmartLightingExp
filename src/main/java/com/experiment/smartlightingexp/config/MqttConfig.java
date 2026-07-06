@@ -23,8 +23,10 @@ public class MqttConfig {
         MqttConnectOptions options = new MqttConnectOptions();
         options.setAutomaticReconnect(true);
         options.setCleanSession(true);
-        options.setConnectionTimeout(30);
+        options.setConnectionTimeout(60);
+        options.setExecutorServiceTimeout(60);
         options.setKeepAliveInterval(60);
+        options.setMaxInflight(200);
         options.setUserName(props.getUsername());
         options.setPassword(props.getPassword().toCharArray());
 

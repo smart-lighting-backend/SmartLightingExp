@@ -91,13 +91,12 @@ public class HeartbeatMonitorTask {
                 alarmRecordMapper.insert(alarm);
                 alarmCount++;
 
-                log.warn("[{}] ⚠ OFFLINE detected — lastHeartbeat={}, elapsed={}s",
-                        device.getDeviceId(), device.getLastHeartbeatAt(), elapsedSeconds);
+                log.warn("设备离线 [{}], 心跳中断{}秒", device.getDeviceId(), elapsedSeconds);
             }
         }
 
         if (offlineCount > 0) {
-            log.info("HeartbeatMonitor: {} offline, {} new alarms", offlineCount, alarmCount);
+            log.warn("心跳监控: {}台离线, {}条新告警", offlineCount, alarmCount);
         }
     }
 }

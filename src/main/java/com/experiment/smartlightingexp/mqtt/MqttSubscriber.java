@@ -18,6 +18,8 @@ import jakarta.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -40,6 +42,7 @@ public class MqttSubscriber {
     private final ControlCommandMapper controlCommandMapper;
     private final DecisionEngine decisionEngine;
     private final AlarmRecordService alarmRecordService;
+    private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
     @PostConstruct
     public void init() {
@@ -59,15 +62,12 @@ public class MqttSubscriber {
                     if (topic.endsWith("/vision/event")) {
                         VisionEvent ve = objectMapper.readValue(json, VisionEvent.class);
                         visionEventMapper.insert(ve);
-                        log.info("  [{}] 👁 vision event: type={}", deviceId, ve.getEventType());
                         alarmRecordService.resolveOfflineAlarm(deviceId);
                         return;
                     }
-                    // 语音事件
                     if (topic.endsWith("/voice/event")) {
                         VoiceEvent vo = objectMapper.readValue(json, VoiceEvent.class);
                         voiceEventMapper.insert(vo);
-                        log.info("  [{}] 🔊 voice event: type={}", deviceId, vo.getType());
                         alarmRecordService.resolveOfflineAlarm(deviceId);
                         return;
                     }
@@ -98,54 +98,57 @@ public class MqttSubscriber {
                                 cmd.setStatus(ackStatus);
                                 cmd.setAckAt(LocalDateTime.now());
                                 controlCommandMapper.updateById(cmd);
-                                log.info("  [{}] ✅ ACK received: cmdId={}, status={}", deviceId, commandId, ackStatus);
                             }
                         }
                         return;
                     }
 
-                    // 遥测数据
-                    Telemetry telemetry = objectMapper.readValue(json, Telemetry.class);
-                    telemetryMapper.insert(telemetry);
-                    LocalDateTime now = LocalDateTime.now();
+                    // 遥测数据 — 提交到线程池处理，避免阻塞 MQTT 接收线程
+                    final String telemetryJson = json;
+                    final String telemetryDeviceId = deviceId;
+                    executor.submit(() -> {
+                        try {
+                            Telemetry telemetry = objectMapper.readValue(telemetryJson, Telemetry.class);
+                            telemetryMapper.insert(telemetry);
+                            log.info("遥测入库 [{}]: lux={}, temp={}°C", telemetryDeviceId, telemetry.getIlluminance(), telemetry.getTemperature());
+                            LocalDateTime now = LocalDateTime.now();
 
-                    Device device = deviceMapper.selectOne(
-                            Wrappers.<Device>lambdaQuery().eq(Device::getDeviceId, deviceId));
-                    boolean inManual = device != null
-                            && Boolean.TRUE.equals(device.getManualMode())
-                            && device.getManualExpireAt() != null
-                            && device.getManualExpireAt().isAfter(now);
+                            Device device = deviceMapper.selectOne(
+                                    Wrappers.<Device>lambdaQuery().eq(Device::getDeviceId, telemetryDeviceId));
+                            boolean inManual = device != null
+                                    && Boolean.TRUE.equals(device.getManualMode())
+                                    && device.getManualExpireAt() != null
+                                    && device.getManualExpireAt().isAfter(now);
 
-                    if (inManual) {
-                        deviceMapper.update(null,
-                                Wrappers.<Device>lambdaUpdate()
-                                        .eq(Device::getDeviceId, deviceId)
-                                        .set(Device::getLatestData, json)
-                                        .set(Device::getLastHeartbeatAt, now)
-                                        .set(Device::getStatus, 1));
-                        log.info("  [{}] ← MQTT received (manual mode, AI skipped) → DB inserted (id={})",
-                                deviceId, telemetry.getId());
-                    } else {
-                        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device> updateWrapper =
-                                Wrappers.<Device>lambdaUpdate()
-                                        .eq(Device::getDeviceId, deviceId)
-                                        .set(Device::getLatestData, json)
-                                        .set(Device::getLastHeartbeatAt, now)
-                                        .set(Device::getStatus, 1);
-                        if (device != null && Boolean.TRUE.equals(device.getManualMode())) {
-                            updateWrapper.set(Device::getManualMode, false)
-                                    .set(Device::getManualExpireAt, null);
-                            log.info("  [{}] Manual mode expired, auto-cleared", deviceId);
+                            if (inManual) {
+                                deviceMapper.update(null,
+                                        Wrappers.<Device>lambdaUpdate()
+                                                .eq(Device::getDeviceId, telemetryDeviceId)
+                                                .set(Device::getLatestData, telemetryJson)
+                                                .set(Device::getLastHeartbeatAt, now)
+                                                .set(Device::getStatus, 1));
+                            } else {
+                                com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device> updateWrapper =
+                                        Wrappers.<Device>lambdaUpdate()
+                                                .eq(Device::getDeviceId, telemetryDeviceId)
+                                                .set(Device::getLatestData, telemetryJson)
+                                                .set(Device::getLastHeartbeatAt, now)
+                                                .set(Device::getStatus, 1);
+                                if (device != null && Boolean.TRUE.equals(device.getManualMode())) {
+                                    updateWrapper.set(Device::getManualMode, false)
+                                            .set(Device::getManualExpireAt, null);
+                                }
+                                deviceMapper.update(null, updateWrapper);
+                                decisionEngine.evaluate(telemetryDeviceId, telemetry);
+                            }
+
+                            alarmRecordService.resolveOfflineAlarm(telemetryDeviceId);
+                        } catch (Exception e) {
+                            log.error("遥测处理失败 [{}]: {}", telemetryDeviceId, e.getMessage());
                         }
-                        deviceMapper.update(null, updateWrapper);
-                        log.info("  [{}] ← MQTT received → DB inserted (id={})",
-                                deviceId, telemetry.getId());
-                        decisionEngine.evaluate(deviceId, telemetry);
-                    }
-
-                    alarmRecordService.resolveOfflineAlarm(deviceId);
+                    });
                 } catch (Exception e) {
-                    log.error("  [{}] ✗ process failed: {}", topic, e.getMessage());
+                    log.error("MQTT消息处理失败 [{}]: {}", topic, e.getMessage());
                 }
             }
 

@@ -47,7 +47,6 @@ public class EnergyCalcTask {
     @Scheduled(cron = "0 55 23 * * ?")
     public void calcDailyEnergy() {
         LocalDate today = LocalDate.now();
-        log.info("===== EnergyCalcTask start for {} =====", today);
 
         List<Device> devices = deviceMapper.selectList(
                 Wrappers.<Device>lambdaQuery()
@@ -55,7 +54,6 @@ public class EnergyCalcTask {
                         .eq(Device::getDeleted, false));
 
         if (devices.isEmpty()) {
-            log.warn("No enabled devices found, skip");
             return;
         }
 
@@ -141,11 +139,11 @@ public class EnergyCalcTask {
                         device.getDeviceId(), String.format("%.1f", avgBrightness),
                         onDurationMin, estimatedKwh, savingRate);
             } catch (Exception e) {
-                log.error("[{}] EnergyCalcTask error: {}", device.getDeviceId(), e.getMessage());
+                log.error("能耗计算失败 [{}]: {}", device.getDeviceId(), e.getMessage());
             }
         }
 
-        log.info("===== EnergyCalcTask done: {}/{} =====", successCount, devices.size());
+        log.info("能耗计算完成: {}/{} 台设备, 日期={}", successCount, devices.size(), today);
     }
 
     /**
@@ -215,7 +213,6 @@ public class EnergyCalcTask {
                         .eq(Device::getDeleted, false));
 
         if (devices.isEmpty()) {
-            log.warn("No enabled devices found, skip historical data generation");
             return;
         }
 
@@ -268,6 +265,5 @@ public class EnergyCalcTask {
                 }
             }
         }
-        log.info("===== Historical data generation done: {} records =====", totalGenerated);
     }
 }
