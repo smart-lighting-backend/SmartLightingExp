@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -91,8 +92,10 @@ public class UserController {
         }
 
         // 组装返回结果（隐藏密码，附加角色信息）
+        AtomicLong displayIdCounter = new AtomicLong((result.getCurrent() - 1) * result.getSize() + 1);
         List<Map<String, Object>> records = result.getRecords().stream().map(user -> {
             Map<String, Object> item = new LinkedHashMap<>();
+            item.put("displayId", displayIdCounter.getAndIncrement());
             item.put("id", user.getId());
             item.put("username", user.getUsername());
             item.put("realName", user.getRealName());
