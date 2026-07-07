@@ -392,6 +392,36 @@ public class DeviceController {
         return Result.success();
     }
 
+    // ======================== 地图轻量接口 ========================
+
+    /**
+     * 地图标记 — 仅返回 6 个字段，比 /list?pageSize=10000 轻量 60%+。
+     * 用于 Dashboard 数字孪生地图组件，避免传输 latestData 等大字段。
+     */
+    @RequirePermission("device:read")
+    @GetMapping("/map-locations")
+    public Result<List<Map<String, Object>>> mapLocations() {
+        List<Device> devices = deviceService.lambdaQuery()
+                .select(Device::getDeviceId, Device::getName, Device::getLocation,
+                        Device::getStatus, Device::getArea, Device::getHealthScore)
+                .eq(Device::getDeleted, false)
+                .eq(Device::getEnabled, true)
+                .list();
+
+        List<Map<String, Object>> result = new ArrayList<>(devices.size());
+        for (Device d : devices) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("deviceId", d.getDeviceId());
+            item.put("name", d.getName());
+            item.put("location", d.getLocation());
+            item.put("status", d.getStatus());
+            item.put("area", d.getArea());
+            item.put("healthScore", d.getHealthScore());
+            result.add(item);
+        }
+        return Result.success(result);
+    }
+
     // ======================== 审计日志 ========================
 
     private void saveAuditLog(String action, String targetType, String targetId,

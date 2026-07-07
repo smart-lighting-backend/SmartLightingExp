@@ -240,6 +240,21 @@ public class AlarmController {
     // ======================== 统计与趋势 ========================
 
     /**
+     * 告警计数 — 仅返回指定状态的告警总数。
+     * 用于顶栏告警角标，比 /list?pageSize=1 更轻量。
+     */
+    @RequirePermission("alarm:read")
+    @GetMapping("/count")
+    public Result<Map<String, Object>> count(@RequestParam(defaultValue = "ACTIVE") String status) {
+        long count = alarmRecordMapper.selectCount(
+                new LambdaQueryWrapper<AlarmRecord>().eq(AlarmRecord::getStatus, status));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", status);
+        result.put("count", count);
+        return Result.success(result);
+    }
+
+    /**
      * 告警统计：按级别、类型、状态分别统计数量。
      * 用于大屏展示（满足 IR-08 数字孪生可视化大屏）。
      */
