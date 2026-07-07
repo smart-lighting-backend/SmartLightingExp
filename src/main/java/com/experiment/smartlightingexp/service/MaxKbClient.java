@@ -4,14 +4,18 @@ import com.experiment.smartlightingexp.common.BusinessException;
 import com.experiment.smartlightingexp.config.MaxKbProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +29,20 @@ public class MaxKbClient {
 
     private final MaxKbProperties properties;
     private final ObjectMapper objectMapper;
+
+    private RestClient restClient;
+
+    @PostConstruct
+    void init() {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofSeconds(60));
+        this.restClient = RestClient.builder()
+                .requestFactory(factory)
+                .build();
+    }
 
     /** 兼容旧调用：纯用户消息，无 system prompt */
     public String chat(String question) {
@@ -53,7 +71,7 @@ public class MaxKbClient {
                     "messages", messages
             ));
 
-            String responseJson = RestClient.create()
+            String responseJson = restClient
                     .post()
                     .uri(properties.getChatCompletionsUrl())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -68,6 +86,11 @@ public class MaxKbClient {
 
             Map<String, Object> response = objectMapper.readValue(responseJson,
                     new TypeReference<Map<String, Object>>() {});
+            // 调试：检查知识库引用（references 有值说明检索成功，空/null 说明未命中知识库）
+            Object refs = response.get("references");
+            int refCount = refs instanceof List<?> list ? list.size() : 0;
+            log.info("MaxKB 知识库引用数={}, content长度={}",
+                    refCount, extractContent(response).length());
             return extractContent(response);
         } catch (RestClientException e) {
             log.error("MaxKB 请求失败: {}", e.getMessage());

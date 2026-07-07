@@ -13,10 +13,14 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -33,9 +37,25 @@ public class AssistantService {
             "(?:光照阈值|亮灯阈值|开灯阈值|阈值).{0,12}?(?:调到|调整到|设置为|设为|改为|改成|=|:|：)?\\s*(-?\\d+(?:\\.\\d+)?)"
     );
 
-    // ── AI 意图识别 ─────────────────────────────────────────────────────────
-    private static final String INTENT_SYSTEM_PROMPT = """
-你是一个智慧路灯系统的运维助手。你可以帮助用户修改照明策略参数。
+    // ── 纯问答轻量提示词（仅 60 字符，给 MaxKB 领域上下文 + 简洁约束） ───
+    private static final String QA_SYSTEM_PROMPT = """
+你是智慧路灯运维助手，专精路灯故障排查与维修。回答要求：简洁，3-5条要点，不超300字。""";
+
+    // ── 本地关键词预筛（判断是否为参数修改命令） ─────────────────────────
+    // 只有命中这些词才携带大型 System Prompt 调用 MaxKB，
+    // 纯知识问答类消息用轻量 Prompt，省掉 Token 开销
+    private static final Pattern PARAM_COMMAND_PATTERN = Pattern.compile(
+            "调到|调整到|修改|更改|设置|设为|改成|改为|调高|调低|调亮|调暗|"
+            + "阈值|亮度|调光|关灯|开灯|启用|停用|"
+            + "温度触发|开始时间|结束时间|时段|lux|策略参数");
+
+    private boolean looksLikeParamCommand(String message) {
+        return PARAM_COMMAND_PATTERN.matcher(message).find();
+    }
+
+    // ── AI 意图识别 + 知识问答（合并为一次调用） ─────────────────────────────
+    private static final String COMBINED_SYSTEM_PROMPT = """
+你是一个智慧路灯系统的运维助手。你可以帮助用户解答运维知识问题，也可以帮助用户修改照明策略参数。
 
 当前系统可调整的策略：
   策略ID=2「深夜节能调光」(type=SCENE)，当前参数：lux_lt=30, temp_lt=5, startTime=23:00, endTime=05:00
@@ -49,12 +69,13 @@ public class AssistantService {
   - brightness: 调光亮度(%)，范围 0-100
   - enabled: 启用/停用策略，true/false
 
-你必须**只返回**一个 JSON 对象，不要包含任何其他文字、解释、代码块标记：
-
+如果用户意图是修改上述策略参数，请确认修改并给出操作说明，然后在回答末尾附加一个 JSON 代码块：
+```json
 {"intent":"UPDATE_POLICY","params":{"lux_lt":30}}
+```
+params 只包含要修改的参数。注意：JSON 必须用 ```json ``` 包裹。
 
-如果用户意图是修改策略参数，intent 为 UPDATE_POLICY，params 只包含要修改的参数。
-如果用户只是提问、咨询、闲聊、或意图无法识别，intent 为 CHAT，params 为空对象 {}。
+如果用户只是咨询、闲聊或询问运维知识，则正常回答问题，**不要**附加任何 JSON。
 """;
 
     // ── 参数白名单 ───────────────────────────────────────────────────────────
@@ -87,30 +108,82 @@ public class AssistantService {
     private final AlarmRecordService alarmRecordService;
     private final ControlCommandMapper controlCommandMapper;
 
+    // ── 响应缓存（减少重复请求的 MaxKB 等待时间） ─────────────────────────
+    private static final int CACHE_MAX_SIZE = 200;
+    private static final long CACHE_TTL_MS = 2 * 60 * 1000; // 2 分钟
+    private final ConcurrentHashMap<String, CacheEntry> responseCache = new ConcurrentHashMap<>();
+
+    private record CacheEntry(AssistantChatResponse response, long expireAt) {}
+
+    private AssistantChatResponse getCached(String key) {
+        CacheEntry entry = responseCache.get(key);
+        if (entry != null && System.currentTimeMillis() < entry.expireAt()) {
+            // 清理过期 entry（惰性清理，不阻塞读）
+            if (responseCache.size() > CACHE_MAX_SIZE) {
+                responseCache.entrySet().removeIf(e -> System.currentTimeMillis() > e.getValue().expireAt());
+            }
+            return entry.response();
+        }
+        responseCache.remove(key);
+        return null;
+    }
+
+    private void putCache(String key, AssistantChatResponse response) {
+        if (responseCache.size() >= CACHE_MAX_SIZE) {
+            responseCache.entrySet().removeIf(e -> System.currentTimeMillis() > e.getValue().expireAt());
+        }
+        if (responseCache.size() < CACHE_MAX_SIZE) {
+            responseCache.put(key, new CacheEntry(response, System.currentTimeMillis() + CACHE_TTL_MS));
+        }
+    }
+
+    private String cacheKey(String... parts) {
+        return String.join("::", parts);
+    }
+
     // ── 主入口 ──────────────────────────────────────────────────────────────
 
     public AssistantChatResponse chat(String rawMessage) {
         String message = rawMessage.trim();
 
-        // 第一段：本地正则快速路径
+        // 第一段：本地正则快速路径（纯阈值命令，毫秒级，不缓存）
         Optional<BigDecimal> threshold = parseThresholdCommand(message);
         if (threshold.isPresent()) {
             return executeThresholdUpdate(threshold.get());
         }
 
-        // 第二段：AI 意图识别
-        try {
-            String aiRaw = maxKbClient.chatWithSystem(INTENT_SYSTEM_PROMPT, message);
-            Map<String, Object> aiJson = maxKbClient.tryExtractJson(aiRaw);
-            if (aiJson != null) {
-                return handleAiIntent(aiJson, message);
-            }
-        } catch (Exception e) {
-            log.warn("AI 意图识别失败，降级为纯问答: {}", e.getMessage());
+        // 第二段：查缓存（2 分钟 TTL，重复问题即时返回）
+        String cacheKey = cacheKey("chat", message);
+        AssistantChatResponse cached = getCached(cacheKey);
+        if (cached != null) {
+            return cached;
         }
 
-        // 第三段：纯知识问答
-        return AssistantChatResponse.knowledge(maxKbClient.chat(message));
+        AssistantChatResponse response;
+
+        // 第三段：本地关键词预筛
+        if (looksLikeParamCommand(message)) {
+            // 参数修改意图 → 带 System Prompt 调用 MaxKB
+            String aiRaw = maxKbClient.chatWithSystem(COMBINED_SYSTEM_PROMPT, message);
+            Map<String, Object> aiJson = maxKbClient.tryExtractJson(aiRaw);
+            if (aiJson != null && "UPDATE_POLICY".equals(aiJson.get("intent"))) {
+                try {
+                    response = handleAiIntent(aiJson, message);
+                } catch (BusinessException e) {
+                    response = AssistantChatResponse.knowledge(
+                            aiRaw + "\n\n---\n系统未能执行参数修改: " + e.getMessage());
+                }
+            } else {
+                response = AssistantChatResponse.knowledge(aiRaw);
+            }
+        } else {
+            // 第四段：纯知识问答 — 轻量 System Prompt（领域上下文 + 简洁约束）
+            response = AssistantChatResponse.knowledge(
+                    maxKbClient.chatWithSystem(QA_SYSTEM_PROMPT, message));
+        }
+
+        putCache(cacheKey, response);
+        return response;
     }
 
     // ── 第一段：正则阈值 ────────────────────────────────────────────────────
@@ -136,16 +209,9 @@ public class AssistantService {
 
     @SuppressWarnings("unchecked")
     private AssistantChatResponse handleAiIntent(Map<String, Object> aiJson, String originalMessage) {
-        String intent = aiJson.get("intent") != null ? aiJson.get("intent").toString() : "";
-
-        if (!"UPDATE_POLICY".equals(intent)) {
-            // 非修改意图，走纯问答
-            return AssistantChatResponse.knowledge(maxKbClient.chat(originalMessage));
-        }
-
         Object paramsObj = aiJson.get("params");
         if (!(paramsObj instanceof Map<?, ?> rawParams)) {
-            return AssistantChatResponse.knowledge(maxKbClient.chat(originalMessage));
+            throw new BusinessException(400, "AI 返回了 UPDATE_POLICY 意图但未包含有效的 params");
         }
 
         Map<String, Object> params = new LinkedHashMap<>();
@@ -159,7 +225,6 @@ public class AssistantService {
             return AssistantChatResponse.knowledge("已收到修改请求，但未识别到有效的参数。请明确具体要改哪个参数，例如：'把开灯阈值调到35'。");
         }
 
-        // 校验并执行
         validateParams(params);
         LightingPolicy policy = applyParams(params);
         String description = buildResultDescription(params);
@@ -382,60 +447,139 @@ public class AssistantService {
                 .eq(Device::getDeviceId, deviceId).eq(Device::getDeleted, false).one();
         if (device == null) return AssistantChatResponse.knowledge("设备 " + deviceId + " 不存在。");
 
+        boolean hasQuestion = question != null && !question.isBlank();
+
+        // 无具体问题 → 本地快速诊断（秒级），不调用 MaxKB
+        if (!hasQuestion) {
+            return buildLocalDiagnosis(device);
+        }
+
+        // 有具体问题 → 带缓存调 MaxKB
+        String cacheKey = cacheKey("diag", deviceId, question);
+        AssistantChatResponse cached = getCached(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
+        String prompt = buildCompactDiagnosisPrompt(device, question);
+        AssistantChatResponse response;
+        try {
+            response = AssistantChatResponse.knowledge(maxKbClient.chat(prompt));
+        } catch (Exception e) {
+            response = buildLocalDiagnosis(device);
+        }
+        putCache(cacheKey, response);
+        return response;
+    }
+
+    /** 本地快速诊断 — 基于规则的即时评估，不调用 MaxKB */
+    private AssistantChatResponse buildLocalDiagnosis(Device device) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== ").append(device.getDeviceId());
+        if (device.getName() != null) sb.append(" ").append(device.getName());
+        sb.append(" ===\n\n");
+
+        // 1. 健康评分
+        int score = device.getHealthScore() != null ? device.getHealthScore().intValue() : 0;
+        String level = score >= 90 ? "优秀" : score >= 70 ? "良好" : score >= 50 ? "一般" : score >= 30 ? "较差" : "危险";
+        sb.append("健康评分: ").append(score).append(" (").append(level).append(")\n");
+
+        // 2. 在线状态
+        sb.append("设备状态: ").append(statusLabel(device.getStatus())).append("\n");
+
+        // 3. 最近告警
+        List<AlarmRecord> alarms = alarmRecordService.list(
+                new LambdaQueryWrapper<AlarmRecord>().eq(AlarmRecord::getDeviceId, device.getDeviceId())
+                        .orderByDesc(AlarmRecord::getStartAt).last("LIMIT 5"));
+        long activeAlarmCount = alarms.stream().filter(a -> "ACTIVE".equals(a.getStatus())).count();
+        sb.append("活跃告警: ").append(activeAlarmCount).append(" 条\n");
+        if (!alarms.isEmpty()) {
+            for (AlarmRecord a : alarms) {
+                sb.append("  - ").append(alarmLabel(a.getType()))
+                        .append(" (").append(a.getLevel()).append(")")
+                        .append(" | ").append(a.getStartAt());
+                if ("RESOLVED".equals(a.getStatus())) sb.append(" | 已恢复");
+                sb.append("\n");
+            }
+        }
+
+        // 4. 指令响应率
+        List<ControlCommand> cmds = controlCommandMapper.selectList(
+                new LambdaQueryWrapper<ControlCommand>().eq(ControlCommand::getDeviceId, device.getDeviceId())
+                        .ge(ControlCommand::getIssuedAt, java.time.LocalDateTime.now().minusDays(7)));
+        long acked = cmds.stream().filter(c -> c.getAckAt() != null).count();
+        String respRate = cmds.isEmpty() ? "无记录" :
+                Math.round(100.0 * acked / cmds.size()) + "% (" + acked + "/" + cmds.size() + ")";
+        sb.append("指令响应率: ").append(respRate).append("\n");
+
+        // 5. 最新遥测摘要
+        if (device.getLatestData() != null && !device.getLatestData().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> tel = objectMapper.readValue(device.getLatestData(), Map.class);
+                sb.append("最新遥测: ");
+                sb.append("光照=").append(tel.getOrDefault("illuminance", "?")).append("lux, ");
+                sb.append("温度=").append(tel.getOrDefault("temperature", "?")).append("℃, ");
+                sb.append("AQI=").append(tel.getOrDefault("aqi", "?")).append("\n");
+            } catch (Exception ignored) {}
+        }
+
+        // 6. 规则评估
+        sb.append("\n---\n");
+        if (score >= 90 && device.getStatus() != null && device.getStatus() == 1) {
+            sb.append("设备运行正常，无需干预。");
+        } else if (device.getStatus() != null && device.getStatus() == 2) {
+            sb.append("设备离线，建议检查供电和网络连接。");
+        } else if (score < 50) {
+            sb.append("健康分偏低，建议安排检修。可输入具体问题获取 AI 深度分析（例：\"检查通信模块\"）。");
+        } else if (activeAlarmCount > 0) {
+            sb.append("存在活跃告警，请查看告警详情。输入具体问题可获取 AI 维修建议。");
+        } else {
+            sb.append("如需 AI 深度分析，请在输入框中描述具体问题。");
+        }
+
+        return AssistantChatResponse.knowledge(sb.toString());
+    }
+
+    /** 精简版诊断 Prompt — 比原文减少约 40% Token */
+    private String buildCompactDiagnosisPrompt(Device device, String question) {
         StringBuilder ctx = new StringBuilder();
-        ctx.append("你是一个智慧路灯维修专家。请根据以下设备实时状态数据，分析可能原因并给出维修建议。\n\n");
-        ctx.append("设备: ").append(device.getDeviceId())
-                .append(" (").append(device.getName() != null ? device.getName() : "").append(")\n");
-        ctx.append("区域: ").append(device.getArea() != null ? device.getArea() : "未知").append("\n");
-        ctx.append("健康评分: ").append(device.getHealthScore() != null ? device.getHealthScore() : "未评估").append("\n");
-        ctx.append("状态: ").append(statusLabel(device.getStatus())).append("\n");
+        ctx.append("智慧路灯维修。设备:").append(device.getDeviceId())
+                .append(" ").append(device.getName() != null ? device.getName() : "")
+                .append(", 区域:").append(device.getArea() != null ? device.getArea() : "?")
+                .append(", 健康分:").append(device.getHealthScore() != null ? device.getHealthScore() : "?")
+                .append(", 状态:").append(statusLabel(device.getStatus())).append("\n");
 
         List<AlarmRecord> alarms = alarmRecordService.list(
-                new LambdaQueryWrapper<AlarmRecord>().eq(AlarmRecord::getDeviceId, deviceId)
-                        .orderByDesc(AlarmRecord::getStartAt).last("LIMIT 5"));
+                new LambdaQueryWrapper<AlarmRecord>().eq(AlarmRecord::getDeviceId, device.getDeviceId())
+                        .orderByDesc(AlarmRecord::getStartAt).last("LIMIT 3"));
         if (!alarms.isEmpty()) {
-            ctx.append("最近告警:\n");
+            ctx.append("告警:");
             for (AlarmRecord a : alarms) {
-                ctx.append("  - ").append(a.getType()).append(" (")
-                        .append(a.getStartAt()).append(")");
-                if (a.getRecoverAt() != null) ctx.append(" 已恢复");
-                ctx.append("\n");
+                ctx.append(" ").append(alarmLabel(a.getType())).append("(").append(a.getStatus()).append(")");
             }
-        } else {
-            ctx.append("最近告警: 无\n");
+            ctx.append("\n");
         }
 
         List<ControlCommand> cmds = controlCommandMapper.selectList(
-                new LambdaQueryWrapper<ControlCommand>().eq(ControlCommand::getDeviceId, deviceId)
+                new LambdaQueryWrapper<ControlCommand>().eq(ControlCommand::getDeviceId, device.getDeviceId())
                         .ge(ControlCommand::getIssuedAt, java.time.LocalDateTime.now().minusDays(7)));
         long acked = cmds.stream().filter(c -> c.getAckAt() != null).count();
-        ctx.append("指令响应率: ").append(cmds.isEmpty() ? "无记录" :
-                Math.round(100.0 * acked / cmds.size()) + "% (" + acked + "/" + cmds.size() + ")").append("\n");
+        ctx.append("指令ACK率:").append(cmds.isEmpty() ? "?" :
+                Math.round(100.0 * acked / cmds.size()) + "%").append("\n");
 
         if (device.getLatestData() != null && !device.getLatestData().isBlank()) {
             try {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> tel = objectMapper.readValue(device.getLatestData(), Map.class);
-                ctx.append("当前遥测: ").append(tel).append("\n");
+                ctx.append("遥测: lux=").append(tel.getOrDefault("illuminance", "?"))
+                        .append(" temp=").append(tel.getOrDefault("temperature", "?"))
+                        .append("℃\n");
             } catch (Exception ignored) {}
         }
 
-        if (question != null && !question.isBlank()) {
-            ctx.append("\n用户问题: ").append(question).append("\n");
-        } else {
-            ctx.append("\n请分析该设备健康状态并给出维修建议。\n");
-        }
-
-        try {
-            return AssistantChatResponse.knowledge(maxKbClient.chat(ctx.toString()));
-        } catch (Exception e) {
-            return AssistantChatResponse.knowledge(
-                    "设备 " + deviceId + " 实时状态：健康评分 " +
-                    (device.getHealthScore() != null ? device.getHealthScore() : "未评估") +
-                    "，状态 " + statusLabel(device.getStatus()) +
-                    "，最近告警 " + alarms.size() + " 条。" +
-                    "\n(MaxKB 服务不可用，以上为基础数据摘要，请人工判断)");
-        }
+        ctx.append("问题: ").append(question).append("\n请简洁回答。");
+        return ctx.toString();
     }
 
     private String statusLabel(Integer s) {
@@ -444,6 +588,15 @@ public class AssistantService {
             case 2 -> "离线";
             case 3 -> "异常";
             default -> "停用";
+        };
+    }
+
+    private String alarmLabel(String type) {
+        return switch (type != null ? type : "") {
+            case "OFFLINE" -> "离线";
+            case "FAULT" -> "故障";
+            case "HEALTH_LOW" -> "健康分低";
+            default -> type;
         };
     }
 
