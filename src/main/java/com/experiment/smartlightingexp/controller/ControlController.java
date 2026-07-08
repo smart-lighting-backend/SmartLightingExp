@@ -83,11 +83,12 @@ public class ControlController {
         String cmdStr = "DIMMING".equals(request.getAction())
                 ? "DIMMING(" + request.getBrightness() + ")"
                 : request.getAction();
+        LocalDateTime now = LocalDateTime.now();
 
         // 2. 发布 MQTT 控制指令
         Map<String, Object> cmdPayload = new HashMap<>();
         cmdPayload.put("action", cmdStr);
-        cmdPayload.put("issuedAt", LocalDateTime.now().toString());
+        cmdPayload.put("issuedAt", now.toString());
         cmdPayload.put("source", "MANUAL");
         cmdPayload.put("operator", operator);
         try {
@@ -109,15 +110,15 @@ public class ControlController {
         cmd.setSource("MANUAL");
         cmd.setOperator(operator);
         cmd.setStatus("SENT");
-        cmd.setIssuedAt(LocalDateTime.now());
+        cmd.setIssuedAt(now);
         cmd.setResultDetail("手动控制-" + cmdStr);
         controlCommandMapper.insert(cmd);
 
         // 4. 更新设备 — 手动模式 + 锁定时间（不覆盖 latestData，保留遥测快照）
-        LocalDateTime now = LocalDateTime.now();
         deviceMapper.update(null,
                 new LambdaUpdateWrapper<Device>()
                         .eq(Device::getDeviceId, deviceId)
+                        .set(Device::getLatestData, buildManualControlLatestData(device, request, cmdStr, now))
                         .set(Device::getLastManualAt, now)
                         .set(Device::getManualMode, true)
                         .set(Device::getManualExpireAt, now.plusMinutes(manualLockDurationMinutes)));
@@ -171,6 +172,45 @@ public class ControlController {
         return Result.success();
     }
 
+    private String buildManualControlLatestData(Device device, ControlRequest request,
+                                                String cmdStr, LocalDateTime issuedAt) {
+        Map<String, Object> latestData = new HashMap<>();
+        if (device.getLatestData() != null && !device.getLatestData().isBlank()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parsed = objectMapper.readValue(device.getLatestData(), Map.class);
+                latestData.putAll(parsed);
+            } catch (Exception e) {
+                log.warn("[{}] Failed to parse latestData before manual control: {}",
+                        device.getDeviceId(), e.getMessage());
+            }
+        }
+        latestData.put("action", cmdStr);
+        latestData.put("brightness", resolveManualBrightness(request, latestData));
+        latestData.put("controlSource", "MANUAL");
+        latestData.put("controlIssuedAt", issuedAt.toString());
+        try {
+            return objectMapper.writeValueAsString(latestData);
+        } catch (Exception e) {
+            log.warn("[{}] Failed to write latestData after manual control: {}",
+                    device.getDeviceId(), e.getMessage());
+            return device.getLatestData();
+        }
+    }
+
+    private Integer resolveManualBrightness(ControlRequest request, Map<String, Object> latestData) {
+        if ("OFF".equals(request.getAction())) return 0;
+        if ("DIMMING".equals(request.getAction())) return request.getBrightness();
+        Object current = latestData.get("brightness");
+        if (current instanceof Number number) return Math.max(1, Math.min(100, number.intValue()));
+        if (current != null) {
+            try {
+                return Math.max(1, Math.min(100, Integer.parseInt(current.toString())));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 100;
+    }
     /**
      * 记录审计日志。
      */
