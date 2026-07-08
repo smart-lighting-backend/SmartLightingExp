@@ -85,11 +85,9 @@ public class DecisionEngine {
             }
         }
 
-        // 4. 执行或跳过
+        // 4. 执行或跳过（NO_MATCH 不再写库，减少无用日志堆积）
         if (matchedPolicy != null) {
             executeAction(deviceId, actionTaken, matchedPolicy, telemetry);
-        } else {
-            logNoMatch(deviceId, telemetry);
         }
     }
 
@@ -193,18 +191,6 @@ public class DecisionEngine {
                 decisionLogMapper.insert(failedLog);
             } catch (Exception ex) {
             }
-        }
-    }
-
-    private void logNoMatch(String deviceId, Telemetry telemetry) {
-        try {
-            DecisionLog logEntry = new DecisionLog();
-            logEntry.setDeviceId(deviceId);
-            logEntry.setInputSnapshot(buildSnapshotJson(telemetry));
-            logEntry.setResult("NO_MATCH");
-            decisionLogMapper.insert(logEntry);
-        } catch (Exception e) {
-            log.warn("[{}] Failed to log NO_MATCH: {}", deviceId, e.getMessage());
         }
     }
 

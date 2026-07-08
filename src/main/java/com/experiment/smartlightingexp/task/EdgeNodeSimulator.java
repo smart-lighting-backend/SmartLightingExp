@@ -6,6 +6,7 @@ import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.tdengine.TelemetryDao;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 边缘 AI 决策模拟器。
@@ -37,17 +39,41 @@ public class EdgeNodeSimulator {
     private final ObjectMapper objectMapper;
 
     private final Random random = new Random();
-    private int totalEdgeDecisions = 0;
+    private final AtomicInteger totalEdgeDecisions = new AtomicInteger(0);
+    private final AtomicInteger edgeHits = new AtomicInteger(0);
+    private volatile LocalDateTime lastSimulatedAt;
+
+    @PostConstruct
+    public void initCounters() {
+        try {
+            int total = decisionLogMapper.selectCount(
+                    new LambdaQueryWrapper<DecisionLog>()
+                            .likeRight(DecisionLog::getResult, "EDGE_")).intValue();
+            int hits = decisionLogMapper.selectCount(
+                    new LambdaQueryWrapper<DecisionLog>()
+                            .eq(DecisionLog::getResult, "EDGE_MATCH_EXECUTED")).intValue();
+            totalEdgeDecisions.set(total);
+            edgeHits.set(hits);
+            log.info("[EdgeSim] Initialized counters from DB: total={}, hits={}", total, hits);
+        } catch (Exception e) {
+            log.warn("[EdgeSim] Failed to init counters from DB: {}", e.getMessage());
+        }
+    }
 
     @Scheduled(fixedDelay = 60_000L, initialDelay = 120_000L)
     public void simulate() {
+        log.info("[EdgeSim] Tick — starting evaluation round");
         try {
             // ① 选取在线设备
             List<Device> online = deviceMapper.selectList(
                     new LambdaQueryWrapper<Device>()
                             .eq(Device::getStatus, 1)
                             .eq(Device::getDeleted, false));
-            if (online.isEmpty()) return;
+            if (online.isEmpty()) {
+                log.info("[EdgeSim] No online devices found, skip this round");
+                lastSimulatedAt = LocalDateTime.now();
+                return;
+            }
 
             // 随机选至多 5 台作为"有边缘能力"的设备
             Collections.shuffle(online, random);
@@ -60,22 +86,39 @@ public class EdgeNodeSimulator {
                             .eq(LightingPolicy::getDeleted, false)
                             .orderByAsc(LightingPolicy::getPriority));
 
-            if (policies.isEmpty()) return;
+            if (policies.isEmpty()) {
+                log.info("[EdgeSim] No enabled policies, skip this round");
+                lastSimulatedAt = LocalDateTime.now();
+                return;
+            }
 
             int decisions = 0;
+            int hits = 0;
+            int skippedNoTelemetry = 0;
             for (Device device : edgeDevices) {
-                // 获取最新一条遥测
-                Telemetry latest;
+                // 获取最新一条遥测：TDengine → MySQL → device.latestData 三级兜底
+                Telemetry latest = null;
                 try {
                     latest = telemetryDao.latest(device.getDeviceId());
                 } catch (DataAccessException e) {
+                    log.warn("[EdgeSim] TDengine query failed for {}, falling back to MySQL", device.getDeviceId());
                     latest = telemetryMapper.selectOne(
                             new LambdaQueryWrapper<Telemetry>()
                                     .eq(Telemetry::getDeviceId, device.getDeviceId())
                                     .orderByDesc(Telemetry::getCollectedAt)
                                     .last("LIMIT 1"));
                 }
-                if (latest == null) continue;
+                if (latest == null && device.getLatestData() != null) {
+                    try {
+                        latest = objectMapper.readValue(device.getLatestData(), Telemetry.class);
+                    } catch (Exception e) {
+                        log.debug("[EdgeSim] {} failed to parse latestData snapshot", device.getDeviceId());
+                    }
+                }
+                if (latest == null) {
+                    skippedNoTelemetry++;
+                    continue;
+                }
 
                 // ③ 边缘本地评估（与云端逻辑一致）
                 String matchedPolicy = null;
@@ -97,19 +140,30 @@ public class EdgeNodeSimulator {
                 logEntry.setResult(matchedPolicy != null ? "EDGE_MATCH_EXECUTED" : "EDGE_NO_MATCH");
                 decisionLogMapper.insert(logEntry);
                 decisions++;
+                if (matchedPolicy != null) hits++;
             }
 
-            totalEdgeDecisions += decisions;
-            log.info("[EdgeSim] {} edge devices evaluated ({} decisions), total={}",
-                    edgeDevices.size(), decisions, totalEdgeDecisions);
+            totalEdgeDecisions.addAndGet(decisions);
+            edgeHits.addAndGet(hits);
+            lastSimulatedAt = LocalDateTime.now();
+            log.info("[EdgeSim] Round complete: {} candidates, {} decisions ({} hits), {} skipped (no telemetry), total={}, hits={}",
+                    edgeDevices.size(), decisions, hits, skippedNoTelemetry, totalEdgeDecisions.get(), edgeHits.get());
 
         } catch (Exception e) {
-            log.error("[EdgeSim] Simulation failed: {}", e.getMessage());
+            log.error("[EdgeSim] Simulation failed: {}", e.getMessage(), e);
         }
     }
 
     public int getTotalEdgeDecisions() {
-        return totalEdgeDecisions;
+        return totalEdgeDecisions.get();
+    }
+
+    public int getEdgeHits() {
+        return edgeHits.get();
+    }
+
+    public LocalDateTime getLastSimulatedAt() {
+        return lastSimulatedAt;
     }
 
     private String buildSnapshot(Telemetry t) {
@@ -118,6 +172,8 @@ public class EdgeNodeSimulator {
             snap.put("illuminance", t.getIlluminance());
             snap.put("temperature", t.getTemperature());
             snap.put("humidity", t.getHumidity());
+            snap.put("pm25", t.getPm25());
+            snap.put("aqi", t.getAqi());
             snap.put("pir", t.getPir());
             snap.put("trafficFlow", t.getTrafficFlow());
             snap.put("collectedAt", t.getCollectedAt() != null ? t.getCollectedAt().toString() : null);

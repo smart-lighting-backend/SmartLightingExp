@@ -13,8 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 设备分区管理控制器 — 区域 CRUD + 树形结构。
@@ -96,6 +96,54 @@ public class DeviceAreaController {
                 "更新区域-" + updated.getName(), "SUCCESS", request);
         log.info("[区域] 更新: id={}, name={}", id, updated.getName());
         return Result.success(updated);
+    }
+
+    /**
+     * 批量按名称创建区域（幂等：已存在则跳过）。
+     * 适用于批量导入设备时自动补齐缺失分区。
+     */
+    @RequirePermission("device_area:create")
+    @PostMapping("/batch")
+    public Result<Map<String, Object>> batchCreate(@RequestBody List<String> names,
+                                                   HttpServletRequest request) {
+        if (names == null || names.isEmpty()) {
+            return Result.error(400, "区域名称列表不能为空");
+        }
+
+        // 查出现有区域
+        List<DeviceArea> existing = deviceAreaService.lambdaQuery()
+                .in(DeviceArea::getName, names)
+                .list();
+        Set<String> existingNames = existing.stream()
+                .map(DeviceArea::getName)
+                .collect(Collectors.toSet());
+
+        int created = 0;
+        for (String name : names) {
+            if (name == null || name.isBlank()) continue;
+            if (existingNames.contains(name)) continue;
+            DeviceArea area = new DeviceArea();
+            area.setName(name.trim());
+            area.setEnabled(true);
+            deviceAreaService.save(area);
+            existing.add(area);
+            existingNames.add(name);
+            created++;
+            saveAuditLog("AREA_CREATE", "DEVICE_AREA", String.valueOf(area.getId()),
+                    "批量新增区域-" + area.getName(), "SUCCESS", request);
+        }
+
+        // 返回 name → id 映射
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("created", created);
+        result.put("skipped", names.size() - created);
+        result.put("areas", existing.stream().collect(Collectors.toMap(
+                DeviceArea::getName,
+                DeviceArea::getId,
+                (a, b) -> a,
+                LinkedHashMap::new)));
+        log.info("[区域] 批量创建: 请求{}个, 新建{}个, 已存在{}个", names.size(), created, names.size() - created);
+        return Result.success(result);
     }
 
     /** 删除区域（需未被设备引用且无子区域）。 */

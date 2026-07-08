@@ -228,6 +228,20 @@ public class DeviceController {
                 .toList());
         Set<String> batchIds = new HashSet<>();
 
+        // 预加载 area name → areaId 映射
+        Map<String, Long> areaNameToId = new LinkedHashMap<>();
+        List<String> areaNames = devices.stream()
+                .map(Device::getArea)
+                .filter(a -> a != null && !a.isBlank())
+                .distinct()
+                .toList();
+        if (!areaNames.isEmpty()) {
+            deviceAreaMapper.selectList(
+                    new LambdaQueryWrapper<DeviceArea>()
+                            .in(DeviceArea::getName, areaNames))
+                    .forEach(a -> areaNameToId.put(a.getName(), a.getId()));
+        }
+
         for (int i = 0; i < devices.size(); i++) {
             Device d = devices.get(i);
             int row = i + 1;
@@ -258,6 +272,11 @@ public class DeviceController {
             if (d.getEnabled() == null) d.setEnabled(true);
             if (d.getHealthScore() == null) d.setHealthScore(new BigDecimal("100.00"));
             if (d.getTopicPrefix() == null || d.getTopicPrefix().isBlank()) d.setTopicPrefix("streetlight");
+            // area → areaId 映射
+            if (d.getArea() != null && !d.getArea().isBlank()) {
+                Long areaId = areaNameToId.get(d.getArea());
+                if (areaId != null) d.setAreaId(areaId);
+            }
             d.setDeleted(false);
             toSave.add(d);
         }

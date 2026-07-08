@@ -2,6 +2,11 @@ spring:
   application:
     name: SmartLightingExp
 
+  task:
+    scheduling:
+      pool:
+        size: 4
+
   jackson:
     serialization:
       write-dates-as-timestamps: false

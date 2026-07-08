@@ -406,29 +406,20 @@ public class DashboardController {
 
     /**
      * 边缘 AI 节点状态 — Dashboard 顶部卡片展示。
+     * 优先使用内存计数器（即时响应），DB 数据供校验。
      */
     @RequirePermission("dashboard:read")
     @GetMapping("/edge-status")
     public Result<Map<String, Object>> edgeStatus() {
         Map<String, Object> result = new LinkedHashMap<>();
 
-        int edgeTotal = decisionLogMapper.selectCount(
-                new LambdaQueryWrapper<DecisionLog>()
-                        .like(DecisionLog::getResult, "EDGE_")).intValue();
-
-        int edgeHits = decisionLogMapper.selectCount(
-                new LambdaQueryWrapper<DecisionLog>()
-                        .eq(DecisionLog::getResult, "EDGE_MATCH_EXECUTED")).intValue();
-
-        DecisionLog latest = decisionLogMapper.selectOne(
-                new LambdaQueryWrapper<DecisionLog>()
-                        .like(DecisionLog::getResult, "EDGE_")
-                        .orderByDesc(DecisionLog::getCreateTime)
-                        .last("LIMIT 1"));
+        int edgeTotal = edgeNodeSimulator.getTotalEdgeDecisions();
+        int edgeHits = edgeNodeSimulator.getEdgeHits();
+        LocalDateTime lastSim = edgeNodeSimulator.getLastSimulatedAt();
 
         result.put("totalDecisions", edgeTotal);
         result.put("hitCount", edgeHits);
-        result.put("lastSimulatedAt", latest != null ? latest.getCreateTime().toString() : null);
+        result.put("lastSimulatedAt", lastSim != null ? lastSim.toString() : null);
         result.put("enabled", true);
         return Result.success(result);
     }
@@ -441,16 +432,25 @@ public class DashboardController {
         return edgeStatus();
     }
 
-    /** 最近 20 条边缘决策记录 */
+    /**
+     * 最近 N 条边缘决策记录，支持按设备筛选。
+     * GET /api/dashboard/edge/recent?deviceId=SL-001&limit=50
+     */
     @RequirePermission("dashboard:read")
     @GetMapping("/edge/recent")
-    public Result<List<Map<String, Object>>> edgeRecent() {
-        List<DecisionLog> logs = decisionLogMapper.selectList(
-                new LambdaQueryWrapper<DecisionLog>()
-                        .like(DecisionLog::getResult, "EDGE_")
-                        .orderByDesc(DecisionLog::getCreateTime)
-                        .last("LIMIT 20"));
+    public Result<List<Map<String, Object>>> edgeRecent(
+            @RequestParam(required = false) String deviceId,
+            @RequestParam(defaultValue = "20") int limit) {
+        LambdaQueryWrapper<DecisionLog> wrapper = new LambdaQueryWrapper<DecisionLog>();
+        wrapper.likeRight(DecisionLog::getResult, "EDGE_");
+        wrapper.orderByDesc(DecisionLog::getCreateTime);
+        if (deviceId != null && !deviceId.isBlank()) {
+            wrapper.eq(DecisionLog::getDeviceId, deviceId);
+        }
+        int safeLimit = Math.min(Math.max(limit, 1), 200);
+        wrapper.last("LIMIT " + safeLimit);
 
+        List<DecisionLog> logs = decisionLogMapper.selectList(wrapper);
         List<Map<String, Object>> list = new ArrayList<>();
         for (DecisionLog log : logs) {
             Map<String, Object> row = new LinkedHashMap<>();
