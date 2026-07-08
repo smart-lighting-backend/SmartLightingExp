@@ -15,12 +15,17 @@ import com.experiment.smartlightingexp.mapper.RoleMapper;
 import com.experiment.smartlightingexp.mapper.UserMapper;
 import com.experiment.smartlightingexp.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -48,34 +53,7 @@ public class UserController {
     @RequirePermission("user:read")
     @PostMapping("/list")
     public Result<IPage<Map<String, Object>>> list(@RequestBody UserQueryRequest request) {
-        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(User::getDeleted, false);
-
-        if (request.getRoleId() != null) {
-            wrapper.eq(User::getRoleId, request.getRoleId());
-        }
-        if (request.getUsername() != null && !request.getUsername().isBlank()) {
-            wrapper.like(User::getUsername, request.getUsername());
-        }
-        if (request.getRealName() != null && !request.getRealName().isBlank()) {
-            wrapper.like(User::getRealName, request.getRealName());
-        }
-        if (request.getPhone() != null && !request.getPhone().isBlank()) {
-            wrapper.like(User::getPhone, request.getPhone());
-        }
-        if (request.getEmail() != null && !request.getEmail().isBlank()) {
-            wrapper.like(User::getEmail, request.getEmail());
-        }
-        if (request.getDepartment() != null && !request.getDepartment().isBlank()) {
-            wrapper.eq(User::getDepartment, request.getDepartment());
-        }
-        if (request.getAreaCode() != null && !request.getAreaCode().isBlank()) {
-            wrapper.eq(User::getAreaCode, request.getAreaCode());
-        }
-        if (request.getEnabled() != null) {
-            wrapper.eq(User::getEnabled, request.getEnabled());
-        }
-
+        LambdaQueryWrapper<User> wrapper = buildQueryWrapper(request);
         wrapper.orderByAsc(User::getId);
 
         Page<User> page = new Page<>(request.getPage(), request.getSize());
@@ -251,6 +229,11 @@ public class UserController {
             return Result.error("用户不存在");
         }
 
+        // 保护超级管理员
+        if (isSuperAdminUser(existing)) {
+            return Result.error("超级管理员不可停用");
+        }
+
         existing.setEnabled(false);
         userService.updateById(existing);
 
@@ -277,6 +260,11 @@ public class UserController {
             return Result.error("用户不存在");
         }
 
+        // 保护超级管理员
+        if (isSuperAdminUser(existing)) {
+            return Result.error("超级管理员不可删除");
+        }
+
         int deletedRows = userMapper.physicalDeleteById(id);
         if (deletedRows == 0) {
             saveAuditLog("USER_DELETE", "USER", String.valueOf(id),
@@ -298,6 +286,168 @@ public class UserController {
     public Result<List<Role>> getAllRoles() {
         List<Role> roles = roleMapper.selectList(null);
         return Result.success(roles);
+    }
+
+    /**
+     * 批量删除用户（物理删除）。
+     */
+    @RequirePermission("user:delete")
+    @DeleteMapping("/batch")
+    public Result<Void> batchDelete(@RequestBody List<Long> ids,
+                                    HttpServletRequest httpRequest) {
+        if (ids == null || ids.isEmpty()) {
+            return Result.error("请选择要删除的用户");
+        }
+
+        // 保护超级管理员
+        List<User> superAdmins = userService.lambdaQuery()
+                .in(User::getId, ids)
+                .eq(User::getDeleted, false)
+                .list()
+                .stream()
+                .filter(this::isSuperAdminUser)
+                .collect(Collectors.toList());
+        if (!superAdmins.isEmpty()) {
+            String names = superAdmins.stream().map(User::getUsername).collect(Collectors.joining(","));
+            return Result.error("超级管理员(" + names + ")不可删除");
+        }
+
+        for (Long id : ids) {
+            userMapper.physicalDeleteById(id);
+        }
+        saveAuditLog("USER_BATCH_DELETE", "USER",
+                ids.stream().map(String::valueOf).collect(Collectors.joining(",")),
+                "批量删除用户-" + ids.size() + "个", "SUCCESS", httpRequest);
+        log.info("[用户] 批量删除: ids={}, count={}", ids, ids.size());
+        return Result.success();
+    }
+
+    /**
+     * 批量导出用户 Excel。
+     * 根据查询条件导出所有匹配用户（不分页）。
+     */
+    @RequirePermission("user:read")
+    @PostMapping("/export")
+    public void export(@RequestBody UserQueryRequest request,
+                       HttpServletResponse response) throws IOException {
+        LambdaQueryWrapper<User> wrapper = buildQueryWrapper(request);
+        wrapper.orderByAsc(User::getId);
+        List<User> users = userService.list(wrapper);
+
+        Set<Long> roleIds = users.stream()
+                .map(User::getRoleId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> roleNameMap = new HashMap<>();
+        if (!roleIds.isEmpty()) {
+            roleMapper.selectBatchIds(roleIds)
+                    .forEach(r -> roleNameMap.put(r.getId(), r.getName()));
+        }
+
+        Workbook workbook = new XSSFWorkbook();
+        Sheet sheet = workbook.createSheet("用户数据");
+        sheet.setColumnWidth(0, 3000);
+        sheet.setColumnWidth(1, 2500);
+        sheet.setColumnWidth(2, 3000);
+        sheet.setColumnWidth(3, 6000);
+        sheet.setColumnWidth(4, 4000);
+        sheet.setColumnWidth(5, 3000);
+        sheet.setColumnWidth(6, 3000);
+        sheet.setColumnWidth(7, 2000);
+        sheet.setColumnWidth(8, 4000);
+        sheet.setColumnWidth(9, 5000);
+        sheet.setColumnWidth(10, 5000);
+
+        // 表头样式
+        CellStyle headerStyle = workbook.createCellStyle();
+        Font headerFont = workbook.createFont();
+        headerFont.setBold(true);
+        headerFont.setFontHeightInPoints((short) 12);
+        headerStyle.setFont(headerFont);
+        headerStyle.setAlignment(HorizontalAlignment.CENTER);
+
+        // 表头
+        String[] headers = {"用户名", "姓名", "手机号", "邮箱", "部门", "区域编码", "角色", "状态", "最后登录IP", "最后登录时间", "创建时间"};
+        Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+
+        // 数据行
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        int rowIdx = 1;
+        for (User user : users) {
+            Row row = sheet.createRow(rowIdx++);
+            row.createCell(0).setCellValue(user.getUsername() != null ? user.getUsername() : "");
+            row.createCell(1).setCellValue(user.getRealName() != null ? user.getRealName() : "");
+            row.createCell(2).setCellValue(user.getPhone() != null ? user.getPhone() : "");
+            row.createCell(3).setCellValue(user.getEmail() != null ? user.getEmail() : "");
+            row.createCell(4).setCellValue(user.getDepartment() != null ? user.getDepartment() : "");
+            row.createCell(5).setCellValue(user.getAreaCode() != null ? user.getAreaCode() : "");
+            row.createCell(6).setCellValue(roleNameMap.getOrDefault(user.getRoleId(), ""));
+            row.createCell(7).setCellValue(Boolean.TRUE.equals(user.getEnabled()) ? "启用" : "停用");
+            row.createCell(8).setCellValue(user.getLastLoginIp() != null ? user.getLastLoginIp() : "");
+            row.createCell(9).setCellValue(user.getLastLoginTime() != null ? user.getLastLoginTime().format(dtf) : "");
+            row.createCell(10).setCellValue(user.getCreateTime() != null ? user.getCreateTime().format(dtf) : "");
+        }
+
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition", "attachment; filename=\"users_" +
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".xlsx\"");
+        workbook.write(response.getOutputStream());
+        workbook.close();
+    }
+
+    // ======================== 辅助方法 ========================
+
+    /** 超级管理员角色编码 */
+    private static final String SUPER_ADMIN_ROLE_CODE = "SUPER_ADMIN";
+
+    /**
+     * 判断用户是否为超级管理员。
+     */
+    private boolean isSuperAdminUser(User user) {
+        if (user == null || user.getRoleId() == null) return false;
+        Role role = roleMapper.selectById(user.getRoleId());
+        return role != null && SUPER_ADMIN_ROLE_CODE.equals(role.getRoleCode());
+    }
+
+    // ======================== 查询条件构建 ========================
+
+    /**
+     * 构建用户列表查询条件（排除已删除）。
+     */
+    private LambdaQueryWrapper<User> buildQueryWrapper(UserQueryRequest request) {
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getDeleted, false);
+
+        if (request.getRoleId() != null) {
+            wrapper.eq(User::getRoleId, request.getRoleId());
+        }
+        if (request.getUsername() != null && !request.getUsername().isBlank()) {
+            wrapper.like(User::getUsername, request.getUsername());
+        }
+        if (request.getRealName() != null && !request.getRealName().isBlank()) {
+            wrapper.like(User::getRealName, request.getRealName());
+        }
+        if (request.getPhone() != null && !request.getPhone().isBlank()) {
+            wrapper.like(User::getPhone, request.getPhone());
+        }
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            wrapper.like(User::getEmail, request.getEmail());
+        }
+        if (request.getDepartment() != null && !request.getDepartment().isBlank()) {
+            wrapper.eq(User::getDepartment, request.getDepartment());
+        }
+        if (request.getAreaCode() != null && !request.getAreaCode().isBlank()) {
+            wrapper.eq(User::getAreaCode, request.getAreaCode());
+        }
+        if (request.getEnabled() != null) {
+            wrapper.eq(User::getEnabled, request.getEnabled());
+        }
+        return wrapper;
     }
 
     // ======================== 审计日志 ========================

@@ -34,6 +34,9 @@ public class RoleController {
     private final PermissionMapper permissionMapper;
     private final AuditLogMapper auditLogMapper;
 
+    /** 超级管理员角色编码 */
+    private static final String SUPER_ADMIN_ROLE_CODE = "SUPER_ADMIN";
+
     /**
      * 查询所有角色（含权限编码列表）。
      * 用于权限分配页面的角色下拉选择，无需独立权限（属于 permission:read 范畴）。
@@ -129,6 +132,11 @@ public class RoleController {
             return Result.error("角色不存在");
         }
 
+        // 保护超级管理员
+        if (SUPER_ADMIN_ROLE_CODE.equals(existing.getRoleCode())) {
+            return Result.error("超级管理员角色不可修改");
+        }
+
         if (role.getName() != null) existing.setName(role.getName());
         if (role.getDescription() != null) existing.setDescription(role.getDescription());
         roleService.updateById(existing);
@@ -153,6 +161,11 @@ public class RoleController {
             return Result.error("角色不存在");
         }
 
+        // 保护超级管理员
+        if (SUPER_ADMIN_ROLE_CODE.equals(existing.getRoleCode())) {
+            return Result.error("超级管理员角色不可删除");
+        }
+
         roleService.removeById(id);
 
         saveAuditLog("ROLE_DELETE", "ROLE", String.valueOf(id),
@@ -174,6 +187,11 @@ public class RoleController {
             saveAuditLog("ROLE_ASSIGN_PERM", "ROLE", String.valueOf(id),
                     "角色不存在-权限分配失败", "FAIL", httpRequest);
             return Result.error("角色不存在");
+        }
+
+        // 保护超级管理员
+        if (SUPER_ADMIN_ROLE_CODE.equals(existing.getRoleCode())) {
+            return Result.error("超级管理员的权限不可修改");
         }
 
         List<Long> permissionIds = body.get("permissionIds");
