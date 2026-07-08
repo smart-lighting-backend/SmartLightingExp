@@ -35,10 +35,10 @@ public class MaxKbClient {
     @PostConstruct
     void init() {
         HttpClient httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(5))
+                .connectTimeout(Duration.ofSeconds(15))
                 .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
-        factory.setReadTimeout(Duration.ofSeconds(60));
+        factory.setReadTimeout(Duration.ofSeconds(120));
         this.restClient = RestClient.builder()
                 .requestFactory(factory)
                 .build();
