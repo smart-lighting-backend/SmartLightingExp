@@ -4,10 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
+import com.experiment.smartlightingexp.tdengine.TelemetryDao;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -39,6 +41,7 @@ public class HealthScoreTask {
     private final DeviceMapper deviceMapper;
     private final AlarmRecordMapper alarmRecordMapper;
     private final TelemetryMapper telemetryMapper;
+    private final TelemetryDao telemetryDao;
     private final ControlCommandMapper controlCommandMapper;
     private final ObjectMapper objectMapper;
     private final AlarmRecordService alarmRecordService;
@@ -123,18 +126,28 @@ public class HealthScoreTask {
 
     // ───────────── 维度 2：通信质量 (25%) ─────────────
     int calcCommunicationScore(String deviceId) {
-        List<Telemetry> list = telemetryMapper.selectList(
-                new LambdaQueryWrapper<Telemetry>()
-                        .eq(Telemetry::getDeviceId, deviceId)
-                        .ge(Telemetry::getCreateTime, LocalDateTime.now().minusHours(24))
-                        .orderByAsc(Telemetry::getCreateTime));
-        if (list.size() < 3) return 0;
+        List<Telemetry> list;
+        try {
+            list = telemetryDao.query24h(deviceId);
+        } catch (DataAccessException e) {
+            log.warn("TDengine 不可用，降级到 MySQL: {}", e.getMessage());
+            list = telemetryMapper.selectList(
+                    new LambdaQueryWrapper<Telemetry>()
+                            .eq(Telemetry::getDeviceId, deviceId)
+                            .ge(Telemetry::getCreateTime, LocalDateTime.now().minusHours(24))
+                            .orderByAsc(Telemetry::getCreateTime));
+        }
+        if (list == null || list.size() < 3) return 0;
 
         List<Double> gaps = new ArrayList<>();
         for (int i = 1; i < list.size(); i++) {
-            Duration d = Duration.between(list.get(i - 1).getCreateTime(), list.get(i).getCreateTime());
-            gaps.add((double) Math.abs(d.getSeconds() - 300)); // 理想间隔 300s
+            LocalDateTime prev = list.get(i - 1).getCollectedAt();
+            LocalDateTime curr = list.get(i).getCollectedAt();
+            if (prev == null || curr == null) continue;
+            Duration d = Duration.between(prev, curr);
+            gaps.add((double) Math.abs(d.getSeconds() - 300));
         }
+        if (gaps.isEmpty()) return 0;
         double avgDeviation = gaps.stream().mapToDouble(Double::doubleValue).average().orElse(999);
         if (avgDeviation < 30)  return 100;
         if (avgDeviation < 60)  return 80;
