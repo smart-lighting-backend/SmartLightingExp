@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.experiment.smartlightingexp.engine.ConditionEvaluator;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
+import com.experiment.smartlightingexp.tdengine.TelemetryDao;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +31,7 @@ public class EdgeNodeSimulator {
 
     private final DeviceMapper deviceMapper;
     private final TelemetryMapper telemetryMapper;
+    private final TelemetryDao telemetryDao;
     private final LightingPolicyMapper lightingPolicyMapper;
     private final DecisionLogMapper decisionLogMapper;
     private final ObjectMapper objectMapper;
@@ -62,11 +65,16 @@ public class EdgeNodeSimulator {
             int decisions = 0;
             for (Device device : edgeDevices) {
                 // 获取最新一条遥测
-                Telemetry latest = telemetryMapper.selectOne(
-                        new LambdaQueryWrapper<Telemetry>()
-                                .eq(Telemetry::getDeviceId, device.getDeviceId())
-                                .orderByDesc(Telemetry::getCollectedAt)
-                                .last("LIMIT 1"));
+                Telemetry latest;
+                try {
+                    latest = telemetryDao.latest(device.getDeviceId());
+                } catch (DataAccessException e) {
+                    latest = telemetryMapper.selectOne(
+                            new LambdaQueryWrapper<Telemetry>()
+                                    .eq(Telemetry::getDeviceId, device.getDeviceId())
+                                    .orderByDesc(Telemetry::getCollectedAt)
+                                    .last("LIMIT 1"));
+                }
                 if (latest == null) continue;
 
                 // ③ 边缘本地评估（与云端逻辑一致）

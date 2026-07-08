@@ -10,6 +10,9 @@ import com.experiment.smartlightingexp.dto.*;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.service.*;
+import com.experiment.smartlightingexp.tdengine.TelemetryDao;
+import com.experiment.smartlightingexp.tdengine.VisionEventDao;
+import com.experiment.smartlightingexp.tdengine.VoiceEventDao;
 import com.experiment.smartlightingexp.util.EventTextNormalizer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,6 +20,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -551,7 +555,10 @@ public class DeviceController {
 
     private final AlarmRecordMapper alarmRecordMapper;
     private final TelemetryMapper telemetryMapper;
+    private final TelemetryDao telemetryDao;
     private final ControlCommandMapper controlCommandMapper;
+    private final VisionEventDao visionEventDao;
+    private final VoiceEventDao voiceEventDao;
     private final VisionEventService visionEventService;
     private final VoiceEventService voiceEventService;
     private final AlarmRecordService alarmRecordService;
@@ -661,17 +668,26 @@ public class DeviceController {
     }
 
     private int calcComm(String deviceId) {
-        List<Telemetry> list = telemetryMapper.selectList(
-                new LambdaQueryWrapper<Telemetry>()
-                        .eq(Telemetry::getDeviceId, deviceId)
-                        .ge(Telemetry::getCreateTime, LocalDateTime.now().minusHours(24))
-                        .orderByAsc(Telemetry::getCreateTime));
-        if (list.size() < 3) return 0;
+        List<Telemetry> list;
+        try {
+            list = telemetryDao.query24h(deviceId);
+        } catch (DataAccessException e) {
+            list = telemetryMapper.selectList(
+                    new LambdaQueryWrapper<Telemetry>()
+                            .eq(Telemetry::getDeviceId, deviceId)
+                            .ge(Telemetry::getCreateTime, LocalDateTime.now().minusHours(24))
+                            .orderByAsc(Telemetry::getCreateTime));
+        }
+        if (list == null || list.size() < 3) return 0;
         List<Double> gaps = new ArrayList<>();
         for (int i = 1; i < list.size(); i++) {
-            Duration d = Duration.between(list.get(i - 1).getCreateTime(), list.get(i).getCreateTime());
+            LocalDateTime prev = list.get(i - 1).getCollectedAt();
+            LocalDateTime curr = list.get(i).getCollectedAt();
+            if (prev == null || curr == null) continue;
+            Duration d = Duration.between(prev, curr);
             gaps.add((double) Math.abs(d.getSeconds() - 300));
         }
+        if (gaps.isEmpty()) return 0;
         double avg = gaps.stream().mapToDouble(Double::doubleValue).average().orElse(999);
         if (avg < 30) return 100;
         if (avg < 60) return 80;
@@ -751,10 +767,15 @@ public class DeviceController {
         }
 
         // 最新视觉事件
-        VisionEvent ve = visionEventService.getOne(
-                new LambdaQueryWrapper<VisionEvent>()
-                        .eq(VisionEvent::getDeviceId, deviceId)
-                        .orderByDesc(VisionEvent::getOccurredAt).last("LIMIT 1"));
+        VisionEvent ve;
+        try {
+            ve = visionEventDao.latest(deviceId);
+        } catch (DataAccessException e) {
+            ve = visionEventService.getOne(
+                    new LambdaQueryWrapper<VisionEvent>()
+                            .eq(VisionEvent::getDeviceId, deviceId)
+                            .orderByDesc(VisionEvent::getOccurredAt).last("LIMIT 1"));
+        }
         if (ve != null) {
             Map<String, Object> veMap = new LinkedHashMap<>();
             veMap.put("eventType", EventTextNormalizer.normalize(ve.getEventType()));
@@ -767,10 +788,15 @@ public class DeviceController {
         }
 
         // 最新语音事件
-        VoiceEvent vo = voiceEventService.getOne(
-                new LambdaQueryWrapper<VoiceEvent>()
-                        .eq(VoiceEvent::getDeviceId, deviceId)
-                        .orderByDesc(VoiceEvent::getOccurredAt).last("LIMIT 1"));
+        VoiceEvent vo;
+        try {
+            vo = voiceEventDao.latest(deviceId);
+        } catch (DataAccessException e) {
+            vo = voiceEventService.getOne(
+                    new LambdaQueryWrapper<VoiceEvent>()
+                            .eq(VoiceEvent::getDeviceId, deviceId)
+                            .orderByDesc(VoiceEvent::getOccurredAt).last("LIMIT 1"));
+        }
         if (vo != null) {
             Map<String, Object> voMap = new LinkedHashMap<>();
             voMap.put("type", EventTextNormalizer.normalize(vo.getType()));

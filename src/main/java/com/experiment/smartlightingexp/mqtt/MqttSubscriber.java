@@ -4,13 +4,8 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
-import com.experiment.smartlightingexp.entity.VisionEvent;
-import com.experiment.smartlightingexp.entity.VoiceEvent;
 import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
-import com.experiment.smartlightingexp.mapper.TelemetryMapper;
-import com.experiment.smartlightingexp.mapper.VisionEventMapper;
-import com.experiment.smartlightingexp.mapper.VoiceEventMapper;
 import com.experiment.smartlightingexp.engine.DecisionEngine;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,9 +29,6 @@ import org.springframework.stereotype.Component;
 public class MqttSubscriber {
 
     private final MqttClient mqttClient;
-    private final TelemetryMapper telemetryMapper;
-    private final VisionEventMapper visionEventMapper;
-    private final VoiceEventMapper voiceEventMapper;
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
     private final ControlCommandMapper controlCommandMapper;
@@ -59,15 +51,7 @@ public class MqttSubscriber {
                     String deviceId = topic.split("/")[1];
 
                     // 视觉事件
-                    if (topic.endsWith("/vision/event")) {
-                        VisionEvent ve = objectMapper.readValue(json, VisionEvent.class);
-                        visionEventMapper.insert(ve);
-                        alarmRecordService.resolveOfflineAlarm(deviceId);
-                        return;
-                    }
-                    if (topic.endsWith("/voice/event")) {
-                        VoiceEvent vo = objectMapper.readValue(json, VoiceEvent.class);
-                        voiceEventMapper.insert(vo);
+                    if (topic.endsWith("/vision/event") || topic.endsWith("/voice/event")) {
                         alarmRecordService.resolveOfflineAlarm(deviceId);
                         return;
                     }
@@ -109,8 +93,7 @@ public class MqttSubscriber {
                     executor.submit(() -> {
                         try {
                             Telemetry telemetry = objectMapper.readValue(telemetryJson, Telemetry.class);
-                            telemetryMapper.insert(telemetry);
-                            log.info("遥测入库 [{}]: lux={}, temp={}°C", telemetryDeviceId, telemetry.getIlluminance(), telemetry.getTemperature());
+                            log.info("遥测处理 [{}]: lux={}, temp={}°C", telemetryDeviceId, telemetry.getIlluminance(), telemetry.getTemperature());
                             LocalDateTime now = LocalDateTime.now();
 
                             Device device = deviceMapper.selectOne(
