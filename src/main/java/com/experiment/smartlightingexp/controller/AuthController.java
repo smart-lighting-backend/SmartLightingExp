@@ -131,7 +131,10 @@ public class AuthController {
      * 记录审计日志。
      */
     private List<String> getEffectivePermissions(String roleCode, Long roleId) {
-        // 所有角色统一从 role_permission 表动态查询（分配权限后即时生效）
+        // SUPER_ADMIN 无需分配，自动拥有全部权限
+        if ("SUPER_ADMIN".equals(roleCode)) {
+            return permissionService.getAllPermissionCodes();
+        }
         return permissionService.getPermissionCodesByRoleId(roleId);
     }
 
