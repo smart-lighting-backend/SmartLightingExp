@@ -26,4 +26,13 @@ public interface DeviceService extends IService<Device> {
 
     /** 批量更新设备区域 */
     void batchUpdateArea(List<Long> deviceIds, Long areaId, String areaName);
+
+    /** 批量停用设备 */
+    int batchDisableDevices(List<Long> deviceIds);
+
+    /** 批量启用设备 */
+    int batchEnableDevices(List<Long> deviceIds);
+
+    /** 批量删除设备 */
+    int batchDeleteDevices(List<Long> deviceIds);
 }

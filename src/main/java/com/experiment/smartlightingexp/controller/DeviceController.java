@@ -360,6 +360,81 @@ public class DeviceController {
     }
 
     /**
+     * 批量停用设备。
+     */
+    @RequirePermission("device:update")
+    @PutMapping("/batch-disable")
+    public Result<Map<String, Object>> batchDisable(@RequestBody @Valid BatchDeviceRequest request,
+                                                    HttpServletRequest httpRequest) {
+        List<Long> ids = normalizeDeviceIds(request.getDeviceIds());
+        if (ids.isEmpty()) {
+            return Result.error(400, "设备ID列表不能为空");
+        }
+
+        int success = deviceService.batchDisableDevices(ids);
+        if (success == 0) {
+            saveAuditLog("DEVICE_BATCH_DISABLE", "DEVICE", ids.toString(),
+                    "未找到可停用设备-批量停用失败", "FAIL", httpRequest);
+            return Result.error(404, "未找到可停用设备");
+        }
+
+        saveAuditLog("DEVICE_BATCH_DISABLE", "DEVICE", ids.toString(),
+                "批量停用设备-" + success + "台", "SUCCESS", httpRequest);
+        log.info("[设备] 批量停用: 请求数={}, 成功={}", ids.size(), success);
+        return Result.success(batchResult(ids.size(), success));
+    }
+
+    /**
+     * 批量启用设备。
+     */
+    @RequirePermission("device:update")
+    @PutMapping("/batch-enable")
+    public Result<Map<String, Object>> batchEnable(@RequestBody @Valid BatchDeviceRequest request,
+                                                   HttpServletRequest httpRequest) {
+        List<Long> ids = normalizeDeviceIds(request.getDeviceIds());
+        if (ids.isEmpty()) {
+            return Result.error(400, "设备ID列表不能为空");
+        }
+
+        int success = deviceService.batchEnableDevices(ids);
+        if (success == 0) {
+            saveAuditLog("DEVICE_BATCH_ENABLE", "DEVICE", ids.toString(),
+                    "未找到可启用设备-批量启用失败", "FAIL", httpRequest);
+            return Result.error(404, "未找到可启用设备");
+        }
+
+        saveAuditLog("DEVICE_BATCH_ENABLE", "DEVICE", ids.toString(),
+                "批量启用设备-" + success + "台", "SUCCESS", httpRequest);
+        log.info("[设备] 批量启用: 请求数={}, 成功={}", ids.size(), success);
+        return Result.success(batchResult(ids.size(), success));
+    }
+
+    /**
+     * 批量删除设备（逻辑删除）。
+     */
+    @RequirePermission("device:delete")
+    @DeleteMapping("/batch")
+    public Result<Map<String, Object>> batchDelete(@RequestBody @Valid BatchDeviceRequest request,
+                                                   HttpServletRequest httpRequest) {
+        List<Long> ids = normalizeDeviceIds(request.getDeviceIds());
+        if (ids.isEmpty()) {
+            return Result.error(400, "设备ID列表不能为空");
+        }
+
+        int success = deviceService.batchDeleteDevices(ids);
+        if (success == 0) {
+            saveAuditLog("DEVICE_BATCH_DELETE", "DEVICE", ids.toString(),
+                    "未找到可删除设备-批量删除失败", "FAIL", httpRequest);
+            return Result.error(404, "未找到可删除设备");
+        }
+
+        saveAuditLog("DEVICE_BATCH_DELETE", "DEVICE", ids.toString(),
+                "批量删除设备-" + success + "台", "SUCCESS", httpRequest);
+        log.info("[设备] 批量删除: 请求数={}, 成功={}", ids.size(), success);
+        return Result.success(batchResult(ids.size(), success));
+    }
+
+    /**
      * 删除设备（软删除）。
      */
     @RequirePermission("device:delete")
@@ -455,6 +530,21 @@ public class DeviceController {
             ip = ip.split(",")[0].trim();
         }
         return ip;
+    }
+
+    private List<Long> normalizeDeviceIds(List<Long> deviceIds) {
+        return deviceIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> batchResult(int total, int success) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", total);
+        result.put("success", success);
+        result.put("failed", total - success);
+        return result;
     }
 
     // ───────────── 健康评分 API ─────────────

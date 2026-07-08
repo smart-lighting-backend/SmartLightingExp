@@ -33,6 +33,7 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
     private static final long MAX_PAGE_SIZE = 100L;
     private static final int DEVICE_STATUS_DISABLED = 0;
     private static final int DEVICE_STATUS_ONLINE = 1;
+    private static final int DEVICE_STATUS_OFFLINE = 2;
     private static final String DEFAULT_TOPIC_PREFIX = "streetlight";
     private static final BigDecimal DEFAULT_HEALTH_SCORE = new BigDecimal("100.00");
 
@@ -176,6 +177,64 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
                 .set(Device::getArea, areaName));
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchDisableDevices(List<Long> deviceIds) {
+        if (deviceIds == null || deviceIds.isEmpty()) {
+            return 0;
+        }
+        List<Long> activeIds = getActiveDeviceIds(deviceIds);
+        if (activeIds.isEmpty()) {
+            return 0;
+        }
+
+        update(new LambdaUpdateWrapper<Device>()
+                .in(Device::getId, activeIds)
+                .eq(Device::getDeleted, false)
+                .set(Device::getEnabled, false)
+                .set(Device::getStatus, DEVICE_STATUS_DISABLED));
+        return activeIds.size();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchEnableDevices(List<Long> deviceIds) {
+        if (deviceIds == null || deviceIds.isEmpty()) {
+            return 0;
+        }
+        List<Long> activeIds = getActiveDeviceIds(deviceIds);
+        if (activeIds.isEmpty()) {
+            return 0;
+        }
+
+        update(new LambdaUpdateWrapper<Device>()
+                .in(Device::getId, activeIds)
+                .eq(Device::getDeleted, false)
+                .set(Device::getEnabled, true)
+                .set(Device::getStatus, DEVICE_STATUS_OFFLINE));
+        return activeIds.size();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchDeleteDevices(List<Long> deviceIds) {
+        if (deviceIds == null || deviceIds.isEmpty()) {
+            return 0;
+        }
+        List<Long> activeIds = getActiveDeviceIds(deviceIds);
+        if (activeIds.isEmpty()) {
+            return 0;
+        }
+
+        update(new LambdaUpdateWrapper<Device>()
+                .in(Device::getId, activeIds)
+                .eq(Device::getDeleted, false)
+                .set(Device::getEnabled, false)
+                .set(Device::getStatus, DEVICE_STATUS_DISABLED));
+        removeBatchByIds(activeIds);
+        return activeIds.size();
+    }
+
     private Device getActiveDevice(String deviceId) {
         String normalizedDeviceId = normalizeText(deviceId);
         if (!StringUtils.hasText(normalizedDeviceId)) {
@@ -188,6 +247,16 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
             throw new BusinessException(404, "设备不存在");
         }
         return device;
+    }
+
+    private List<Long> getActiveDeviceIds(List<Long> deviceIds) {
+        return list(new LambdaQueryWrapper<Device>()
+                .select(Device::getId)
+                .in(Device::getId, deviceIds)
+                .eq(Device::getDeleted, false))
+                .stream()
+                .map(Device::getId)
+                .toList();
     }
 
     private long normalizePageNum(Long pageNum) {
