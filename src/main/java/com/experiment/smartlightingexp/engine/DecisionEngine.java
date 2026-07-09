@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.engine;
 
+import com.experiment.smartlightingexp.config.MqttProperties;
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.DecisionLog;
 import com.experiment.smartlightingexp.entity.Device;
@@ -36,6 +37,7 @@ public class DecisionEngine {
     private final DecisionLogMapper decisionLogMapper;
     private final DeviceMapper deviceMapper;
     private final MqttPublisher mqttPublisher;
+    private final MqttProperties mqttProperties;
     private final ObjectMapper objectMapper;
 
     /** 手动控制后的 AI 锁定时间（分钟），由 MqttSubscriber 统一管理过期清除 */
@@ -118,7 +120,7 @@ public class DecisionEngine {
             cmdPayload.put("source", "AUTO");
             cmdPayload.put("reason", "策略引擎: " + policyName);
             String payload = objectMapper.writeValueAsString(cmdPayload);
-            mqttPublisher.publish("streetlight/" + deviceId + "/command", payload, 0);
+            mqttPublisher.publish(mqttProperties.getTopicPrefix() + "/" + deviceId + "/command", payload, 0);
 
             // 2. 记录 control_command
             ControlCommand cmd = new ControlCommand();
@@ -160,7 +162,7 @@ public class DecisionEngine {
                         voicePayload.put("source", "自动");
                         voicePayload.put("occurredAt", LocalDateTime.now().toString());
                         String voiceJson = objectMapper.writeValueAsString(voicePayload);
-                        mqttPublisher.publish("streetlight/" + deviceId + "/voice/event", voiceJson, 0);
+                        mqttPublisher.publish(mqttProperties.getTopicPrefix() + "/" + deviceId + "/voice/event", voiceJson, 0);
                     }
                 }
             }

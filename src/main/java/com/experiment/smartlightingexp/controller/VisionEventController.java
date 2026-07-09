@@ -32,28 +32,13 @@ public class VisionEventController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String deviceId,
             @RequestParam(required = false) String eventType) {
-        try {
-            List<VisionEvent> records = visionEventDao.queryPage(deviceId, eventType, page, size);
-            long total = visionEventDao.countPage(deviceId, eventType);
-            records.forEach(EventTextNormalizer::normalizeVisionEvent);
-            Page<VisionEvent> p = new Page<>(page, size);
-            p.setRecords(records);
-            p.setTotal(total);
-            return Result.success(p);
-        } catch (DataAccessException e) {
-            log.warn("TDengine 不可用，降级到 MySQL: {}", e.getMessage());
-            LambdaQueryWrapper<VisionEvent> wrapper = new LambdaQueryWrapper<>();
-            if (deviceId != null && !deviceId.isBlank()) {
-                wrapper.eq(VisionEvent::getDeviceId, deviceId);
-            }
-            if (eventType != null && !eventType.isBlank()) {
-                wrapper.in(VisionEvent::getEventType, EventTextNormalizer.queryValues(eventType));
-            }
-            wrapper.orderByDesc(VisionEvent::getOccurredAt);
-            IPage<VisionEvent> result = visionEventService.page(new Page<>(page, size), wrapper);
-            result.getRecords().forEach(EventTextNormalizer::normalizeVisionEvent);
-            return Result.success(result);
-        }
+        List<VisionEvent> records = visionEventDao.queryPage(deviceId, eventType, page, size);
+        long total = visionEventDao.countPage(deviceId, eventType);
+        records.forEach(EventTextNormalizer::normalizeVisionEvent);
+        Page<VisionEvent> p = new Page<>(page, size);
+        p.setRecords(records);
+        p.setTotal(total);
+        return Result.success(p);
     }
 
     @RequirePermission("events:read")
@@ -62,22 +47,12 @@ public class VisionEventController {
             @PathVariable String deviceId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
-        try {
-            List<VisionEvent> records = visionEventDao.queryPage(deviceId, null, page, size);
-            long total = visionEventDao.countPage(deviceId, null);
-            records.forEach(EventTextNormalizer::normalizeVisionEvent);
-            Page<VisionEvent> p = new Page<>(page, size);
-            p.setRecords(records);
-            p.setTotal(total);
-            return Result.success(p);
-        } catch (DataAccessException e) {
-            log.warn("TDengine 不可用，降级到 MySQL: {}", e.getMessage());
-            LambdaQueryWrapper<VisionEvent> wrapper = new LambdaQueryWrapper<VisionEvent>()
-                    .eq(VisionEvent::getDeviceId, deviceId)
-                    .orderByDesc(VisionEvent::getOccurredAt);
-            IPage<VisionEvent> result = visionEventService.page(new Page<>(page, size), wrapper);
-            result.getRecords().forEach(EventTextNormalizer::normalizeVisionEvent);
-            return Result.success(result);
-        }
+        List<VisionEvent> records = visionEventDao.queryPage(deviceId, null, page, size);
+        long total = visionEventDao.countPage(deviceId, null);
+        records.forEach(EventTextNormalizer::normalizeVisionEvent);
+        Page<VisionEvent> p = new Page<>(page, size);
+        p.setRecords(records);
+        p.setTotal(total);
+        return Result.success(p);
     }
 }

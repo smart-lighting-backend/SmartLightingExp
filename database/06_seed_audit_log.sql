@@ -9,13 +9,13 @@ INSERT INTO audit_log (operator, action, target_type, target_id, detail, result,
 ('admin', 'LOGIN', 'SYSTEM', NULL, '登录失败-密码错误', 'FAIL', '192.168.1.100', NOW() - INTERVAL 3 HOUR),
 
 -- 设备管理
-('admin', 'DEVICE_CREATE', 'DEVICE', '7', '新增设备-SL-007', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 4 HOUR),
-('admin', 'DEVICE_UPDATE', 'DEVICE', 'SL-003', '更新设备-图书馆-01', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 5 HOUR),
-('admin', 'DEVICE_DELETE', 'DEVICE', 'SL-006', '删除设备-北门-01', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 6 HOUR),
+('admin', 'DEVICE_CREATE', 'DEVICE', '7', '新增设备-SL_007', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 4 HOUR),
+('admin', 'DEVICE_UPDATE', 'DEVICE', 'SL_003', '更新设备-图书馆-01', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 5 HOUR),
+('admin', 'DEVICE_DELETE', 'DEVICE', 'SL_006', '删除设备-北门-01', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 6 HOUR),
 
 -- 设备控制
-('admin', 'CONTROL', 'DEVICE', 'SL-001', '手动控制-ON', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 1 HOUR),
-('admin', 'CONTROL', 'DEVICE', 'SL-002', '手动控制-DIMMING(70)', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 90 MINUTE),
+('admin', 'CONTROL', 'DEVICE', 'SL_001', '手动控制-ON', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 1 HOUR),
+('admin', 'CONTROL', 'DEVICE', 'SL_002', '手动控制-DIMMING(70)', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 90 MINUTE),
 
 -- 照明策略
 ('admin', 'THRESHOLD_SET', 'THRESHOLD', '1', '设置光照阈值-lux_lt=50,lux_gt=200', 'SUCCESS', '192.168.1.100', NOW() - INTERVAL 8 HOUR),

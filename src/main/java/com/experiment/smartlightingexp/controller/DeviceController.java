@@ -11,6 +11,8 @@ import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.mqtt.MqttPublisher;
 import com.experiment.smartlightingexp.service.*;
+import com.experiment.smartlightingexp.task.MockDataGenerator;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.experiment.smartlightingexp.tdengine.TelemetryDao;
 import com.experiment.smartlightingexp.tdengine.VisionEventDao;
 import com.experiment.smartlightingexp.tdengine.VoiceEventDao;
@@ -50,6 +52,8 @@ public class DeviceController {
     private final AuditLogMapper auditLogMapper;
     private final DeviceAreaMapper deviceAreaMapper;
     private final MqttPublisher mqttPublisher;
+    @Autowired(required = false)
+    private MockDataGenerator mockDataGenerator;
 
     /**
      * 组合条件分页查询设备列表。
@@ -966,16 +970,7 @@ public class DeviceController {
     }
 
     private int calcComm(String deviceId) {
-        List<Telemetry> list;
-        try {
-            list = telemetryDao.query24h(deviceId);
-        } catch (DataAccessException e) {
-            list = telemetryMapper.selectList(
-                    new LambdaQueryWrapper<Telemetry>()
-                            .eq(Telemetry::getDeviceId, deviceId)
-                            .ge(Telemetry::getCreateTime, LocalDateTime.now().minusHours(24))
-                            .orderByAsc(Telemetry::getCreateTime));
-        }
+        List<Telemetry> list = telemetryDao.query24h(deviceId);
         if (list == null || list.size() < 3) return 0;
         List<Double> gaps = new ArrayList<>();
         for (int i = 1; i < list.size(); i++) {
@@ -1065,15 +1060,7 @@ public class DeviceController {
         }
 
         // 最新视觉事件
-        VisionEvent ve;
-        try {
-            ve = visionEventDao.latest(deviceId);
-        } catch (DataAccessException e) {
-            ve = visionEventService.getOne(
-                    new LambdaQueryWrapper<VisionEvent>()
-                            .eq(VisionEvent::getDeviceId, deviceId)
-                            .orderByDesc(VisionEvent::getOccurredAt).last("LIMIT 1"));
-        }
+        VisionEvent ve = visionEventDao.latest(deviceId);
         if (ve != null) {
             Map<String, Object> veMap = new LinkedHashMap<>();
             veMap.put("eventType", EventTextNormalizer.normalize(ve.getEventType()));
@@ -1086,15 +1073,7 @@ public class DeviceController {
         }
 
         // 最新语音事件
-        VoiceEvent vo;
-        try {
-            vo = voiceEventDao.latest(deviceId);
-        } catch (DataAccessException e) {
-            vo = voiceEventService.getOne(
-                    new LambdaQueryWrapper<VoiceEvent>()
-                            .eq(VoiceEvent::getDeviceId, deviceId)
-                            .orderByDesc(VoiceEvent::getOccurredAt).last("LIMIT 1"));
-        }
+        VoiceEvent vo = voiceEventDao.latest(deviceId);
         if (vo != null) {
             Map<String, Object> voMap = new LinkedHashMap<>();
             voMap.put("type", EventTextNormalizer.normalize(vo.getType()));
@@ -1159,7 +1138,7 @@ public class DeviceController {
         faultTelemetry.put("humidity", 999);
         faultTelemetry.put("pm25", 999);
         faultTelemetry.put("aqi", 999);
-        faultTelemetry.put("pir", 999);
+        faultTelemetry.put("pir", 9);
         faultTelemetry.put("trafficFlow", 999);
         faultTelemetry.put("collectedAt", LocalDateTime.now().toString());
 
@@ -1183,6 +1162,71 @@ public class DeviceController {
         result.put("topic", topic);
         result.put("faultValues", faultTelemetry);
         log.info("[故障模拟] 设备={}, 异常遥测已发布 (×2)", target.getDeviceId());
+        return Result.success(result);
+    }
+
+    /**
+     * 模拟设备离线 — 将随机（或指定）在线设备的最后心跳时间回拨，
+     * 立即产生 OFFLINE 告警，随后心跳恢复自动解除。
+     */
+    @RequirePermission("device:control")
+    @PostMapping("/offline-simulate")
+    public Result<Map<String, Object>> offlineSimulate(@RequestParam(required = false) String deviceId) {
+        Device target;
+        if (deviceId != null && !deviceId.isBlank()) {
+            target = deviceService.lambdaQuery()
+                    .eq(Device::getDeviceId, deviceId)
+                    .eq(Device::getDeleted, false).one();
+            if (target == null) return Result.error("设备不存在: " + deviceId);
+        } else {
+            List<Device> onlineDevices = deviceService.lambdaQuery()
+                    .eq(Device::getEnabled, true)
+                    .eq(Device::getDeleted, false)
+                    .eq(Device::getStatus, 1)
+                    .last("LIMIT 50").list();
+            if (onlineDevices.isEmpty()) {
+                return Result.error("无在线设备可用于离线模拟");
+            }
+            target = onlineDevices.get(new Random().nextInt(onlineDevices.size()));
+        }
+
+        // 让心跳生成器跳过该设备 60 秒，防止立即恢复
+        if (mockDataGenerator != null) {
+            mockDataGenerator.skipHeartbeat(target.getDeviceId(), 60);
+        }
+
+        // 回拨心跳时间到阈值之前（默认360s，这里用370s确保触发）
+        LocalDateTime fakeHeartbeat = LocalDateTime.now().minusSeconds(370);
+        deviceService.lambdaUpdate()
+                .eq(Device::getId, target.getId())
+                .set(Device::getLastHeartbeatAt, fakeHeartbeat)
+                .set(Device::getStatus, 2)
+                .update();
+
+        // 检查是否已有未恢复的离线告警（ACTIVE 或 ACKNOWLEDGED）
+        long existing = alarmRecordMapper.selectCount(
+                new LambdaQueryWrapper<AlarmRecord>()
+                        .eq(AlarmRecord::getDeviceId, target.getDeviceId())
+                        .eq(AlarmRecord::getType, "OFFLINE")
+                        .in(AlarmRecord::getStatus, List.of("ACTIVE", "ACKNOWLEDGED")));
+        if (existing == 0) {
+            AlarmRecord alarm = new AlarmRecord();
+            alarm.setDeviceId(target.getDeviceId());
+            alarm.setType("OFFLINE");
+            alarm.setLevel("MAJOR");
+            alarm.setStatus("ACTIVE");
+            alarm.setReason("心跳中断超过 360 秒，最后心跳时间: " + fakeHeartbeat);
+            alarm.setStartAt(LocalDateTime.now());
+            alarmRecordMapper.insert(alarm);
+            log.info("[离线模拟] 设备={}, OFFLINE 告警已产生", target.getDeviceId());
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", target.getDeviceId());
+        result.put("deviceName", target.getName());
+        result.put("fakedLastHeartbeat", fakeHeartbeat.toString());
+        result.put("note", "已跳过该设备心跳 60 秒，超时后心跳恢复，告警自动解除");
+        log.info("[离线模拟] 设备={}, 心跳已回拨至 {}", target.getDeviceId(), fakeHeartbeat);
         return Result.success(result);
     }
 }

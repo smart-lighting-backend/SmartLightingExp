@@ -36,54 +36,57 @@ public class MockDataGenerator {
 
     private final Random random = new Random();
 
+    /** 心跳跳过列表：deviceId → 跳过截止时间（用于模拟离线） */
+    private final java.util.concurrent.ConcurrentHashMap<String, java.time.LocalDateTime> skipHeartbeatUntil = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
-     * 模拟数据生成任务 — 启动 15s 后首次执行，之后每 30 秒一次。
-     * 查询数据库中所有启用的设备，为每台设备生成随机遥测数据，
-     * 通过 MQTT 发布到 streetlight/{deviceId}/telemetry，
-     * 由 {@link com.experiment.smartlightingexp.mqtt.MqttSubscriber} 订阅后写入数据库。
+     * 让指定设备在 {@code seconds} 秒内不发送心跳（模拟离线）。
+     * 由 DeviceController.offlineSimulate 调用。
      */
-    @Scheduled(initialDelay = 15000, fixedRate = 30000)
+    public void skipHeartbeat(String deviceId, int seconds) {
+        skipHeartbeatUntil.put(deviceId, java.time.LocalDateTime.now().plusSeconds(seconds));
+        log.info("[MockGen] {} 离线模拟: 跳过心跳 {} 秒", deviceId, seconds);
+    }
+
+    /**
+     * 模拟数据生成 — 分批发布，每批 5 台设备，批次间隔 3 秒，
+     * 避免瞬间大量 MQTT 消息导致 EMQX 桥接拥塞。
+     */
+    private static final int BATCH_SIZE = 5;
+    private static final long BATCH_DELAY_MS = 3000;
+    private static final long DEVICE_DELAY_MS = 200;
+
+    @Scheduled(initialDelay = 30000, fixedRate = 60000)
     public void generateData() {
-        // 只查询已启用且未删除的设备
-        LambdaQueryWrapper<Device> query = new LambdaQueryWrapper<Device>()
-                .eq(Device::getEnabled, true)
-                .eq(Device::getDeleted, false);
-        List<Device> devices = deviceMapper.selectList(query);
-        if (devices.isEmpty()) {
+        log.info("MockGen: generateData() 被调度触发");
+        if (!mqttPublisher.isConnected()) {
+            log.warn("MockGen: MQTT 未连接，跳过本轮遥测生成");
             return;
         }
+        log.info("MockGen: MQTT 已连接，开始查询设备...");
+        List<Device> devices = deviceMapper.selectList(
+                new LambdaQueryWrapper<Device>()
+                        .eq(Device::getEnabled, true)
+                        .eq(Device::getDeleted, false));
+        if (devices.isEmpty()) {
+            log.warn("MockGen: 未找到已启用设备，跳过遥测生成");
+            return;
+        }
+        log.info("MockGen: 查到 {} 台设备，开始发布...", devices.size());
 
         int successCount = 0;
-        for (Device device : devices) {
-            int illuminance = random.nextInt(2000);   // 光照强度（lux）
-            double temperature = 15 + (40 - 15) * random.nextDouble();  // 温度（℃）
-            int humidity = 40 + random.nextInt(50);       // 湿度（%）
-            int pm25 = 10 + random.nextInt(140);          // PM2.5 浓度（μg/m³）
-            int aqi = random.nextInt(200);                // 空气质量指数
-            int pir = random.nextInt(2);                  // 人体红外检测 0-无人 1-有人
-            int trafficFlow = random.nextInt(50);         // 车流量（辆/分钟）
+        int batchIndex = 0;
+        for (int i = 0; i < devices.size(); i++) {
+            Device device = devices.get(i);
+            log.info("  [{}/{}] 发布遥测: {}", i + 1, devices.size(), device.getDeviceId());
 
-            Map<String, Object> data = new HashMap<>();
-            data.put("deviceId", device.getDeviceId());   // 设备编号
-            data.put("illuminance", BigDecimal.valueOf(illuminance));   // 光照强度
-            data.put("temperature", BigDecimal.valueOf(temperature).setScale(2, RoundingMode.HALF_UP));  // 温度
-            data.put("humidity", BigDecimal.valueOf(humidity));         // 湿度
-            data.put("pm25", BigDecimal.valueOf(pm25));                 // PM2.5
-            data.put("aqi", aqi);                        // AQI
-            data.put("pir", pir);                         // 人体红外
-            data.put("trafficFlow", trafficFlow);         // 车流量
-            data.put("collectedAt", LocalDateTime.now().toString());    // 采集时间
+            publishTelemetry(device);
+            successCount++;
+            log.info("  [{}/{}] 遥测完成", i + 1, devices.size());
 
-            try {
-                String json = objectMapper.writeValueAsString(data);
-                String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/telemetry";
-                mqttPublisher.publish(topic, json, 0);
-                successCount++;
-            } catch (Exception e) {
-                log.error("遥测发布失败 [{}]: {}", device.getDeviceId(), e.getMessage());
-            }
-
-            // 视觉事件生成：基于传感器数据触发
+            // 视觉事件
+            int pir = random.nextInt(2);
+            int trafficFlow = random.nextInt(50);
             if (pir == 1 && random.nextDouble() < 0.5) {
                 publishVisionEvent(device.getDeviceId(), "行人检测", 0.70 + 0.29 * random.nextDouble());
             }
@@ -91,18 +94,44 @@ public class MockDataGenerator {
                 publishVisionEvent(device.getDeviceId(), "车辆通行", 0.70 + 0.29 * random.nextDouble());
             }
             if (random.nextDouble() < 0.08) {
-                String rareType = random.nextBoolean() ? "异常停车" : "危险场景";
-                publishVisionEvent(device.getDeviceId(), rareType, 0.60 + 0.39 * random.nextDouble());
+                publishVisionEvent(device.getDeviceId(), random.nextBoolean() ? "异常停车" : "危险场景", 0.60 + 0.39 * random.nextDouble());
             }
-
-            // 语音事件生成：20% 随机概率
             if (random.nextDouble() < 0.2) {
                 publishVoiceEvent(device.getDeviceId());
             }
+
+            // 每批结束等待
+            if ((i + 1) % BATCH_SIZE == 0 && i < devices.size() - 1) {
+                batchIndex++;
+                log.info("  --- 第{}批完成 ({}/{}), 等待{}ms ---", batchIndex, i + 1, devices.size(), BATCH_DELAY_MS);
+                try { Thread.sleep(BATCH_DELAY_MS); } catch (InterruptedException ignored) {}
+            } else {
+                try { Thread.sleep(DEVICE_DELAY_MS); } catch (InterruptedException ignored) {}
+            }
         }
-        log.info("Mock遥测: {}/{} 台设备已发布", successCount, devices.size());
+        log.info("Mock遥测完成: {}/{} 台设备 (共{}批)", successCount, devices.size(), batchIndex + 1);
 
         simulateAcks(devices);
+    }
+
+    private void publishTelemetry(Device device) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("deviceId", device.getDeviceId());
+        data.put("illuminance", BigDecimal.valueOf(random.nextInt(2000)));
+        data.put("temperature", BigDecimal.valueOf(15 + (40 - 15) * random.nextDouble()).setScale(2, RoundingMode.HALF_UP));
+        data.put("humidity", BigDecimal.valueOf(40 + random.nextInt(50)));
+        data.put("pm25", BigDecimal.valueOf(10 + random.nextInt(140)));
+        data.put("aqi", random.nextInt(200));
+        data.put("pir", random.nextInt(2));
+        data.put("trafficFlow", random.nextInt(50));
+        data.put("collectedAt", LocalDateTime.now().toString());
+        try {
+            mqttPublisher.publish(
+                    mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/telemetry",
+                    objectMapper.writeValueAsString(data), 0);
+        } catch (Exception e) {
+            log.error("遥测发布失败 [{}]: {}", device.getDeviceId(), e.getMessage());
+        }
     }
 
     /**
@@ -112,27 +141,52 @@ public class MockDataGenerator {
      */
     @Scheduled(initialDelay = 10000, fixedRate = 30000)
     public void generateHeartbeats() {
-        LambdaQueryWrapper<Device> query = new LambdaQueryWrapper<Device>()
-                .eq(Device::getEnabled, true)
-                .eq(Device::getDeleted, false);
-        List<Device> devices = deviceMapper.selectList(query);
-        if (devices.isEmpty()) return;
+        if (!mqttPublisher.isConnected()) {
+            log.warn("MockGen: MQTT 未连接，跳过本轮心跳生成");
+            return;
+        }
+        List<Device> devices = deviceMapper.selectList(
+                new LambdaQueryWrapper<Device>()
+                        .eq(Device::getEnabled, true)
+                        .eq(Device::getDeleted, false));
+        if (devices.isEmpty()) {
+            log.warn("MockGen: 未找到已启用设备，跳过心跳生成");
+            return;
+        }
 
         LocalDateTime now = LocalDateTime.now();
         int count = 0;
-        for (Device device : devices) {
+        int skipped = 0;
+        for (int i = 0; i < devices.size(); i++) {
+            Device device = devices.get(i);
+            LocalDateTime skipUntil = skipHeartbeatUntil.get(device.getDeviceId());
+            if (skipUntil != null) {
+                if (now.isBefore(skipUntil)) {
+                    skipped++;
+                    continue;
+                } else {
+                    skipHeartbeatUntil.remove(device.getDeviceId());
+                }
+            }
             try {
                 Map<String, Object> hb = new HashMap<>();
                 hb.put("deviceId", device.getDeviceId());
                 hb.put("timestamp", now.toString());
-                String json = objectMapper.writeValueAsString(hb);
-                String topic = mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/heartbeat";
-                mqttPublisher.publish(topic, json, 1);
+                mqttPublisher.publish(
+                        mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/heartbeat",
+                        objectMapper.writeValueAsString(hb), 0);
                 count++;
             } catch (Exception e) {
                 log.error("心跳发布失败 [{}]: {}", device.getDeviceId(), e.getMessage());
             }
+            if ((i + 1) % BATCH_SIZE == 0 && i < devices.size() - 1) {
+                try { Thread.sleep(BATCH_DELAY_MS); } catch (InterruptedException ignored) {}
+            } else {
+                try { Thread.sleep(DEVICE_DELAY_MS); } catch (InterruptedException ignored) {}
+            }
         }
+        if (count > 0 || skipped > 0)
+            log.info("Mock心跳: {}/{} 台设备已发布 ({}台跳过)", count, devices.size(), skipped);
     }
 
     /** 模拟设备回复 ACK：查询最近 10 分钟内无确认的指令，以 90% 概率确认。 */

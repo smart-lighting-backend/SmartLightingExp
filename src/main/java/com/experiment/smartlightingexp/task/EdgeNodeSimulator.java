@@ -96,18 +96,8 @@ public class EdgeNodeSimulator {
             int hits = 0;
             int skippedNoTelemetry = 0;
             for (Device device : edgeDevices) {
-                // 获取最新一条遥测：TDengine → MySQL → device.latestData 三级兜底
-                Telemetry latest = null;
-                try {
-                    latest = telemetryDao.latest(device.getDeviceId());
-                } catch (DataAccessException e) {
-                    log.warn("[EdgeSim] TDengine query failed for {}, falling back to MySQL", device.getDeviceId());
-                    latest = telemetryMapper.selectOne(
-                            new LambdaQueryWrapper<Telemetry>()
-                                    .eq(Telemetry::getDeviceId, device.getDeviceId())
-                                    .orderByDesc(Telemetry::getCollectedAt)
-                                    .last("LIMIT 1"));
-                }
+                // 获取最新一条遥测：TDengine → device.latestData 快照兜底
+                Telemetry latest = telemetryDao.latest(device.getDeviceId());
                 if (latest == null && device.getLatestData() != null) {
                     try {
                         latest = objectMapper.readValue(device.getLatestData(), Telemetry.class);

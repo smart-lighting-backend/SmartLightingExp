@@ -1,6 +1,7 @@
 package com.experiment.smartlightingexp.mqtt;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.experiment.smartlightingexp.config.MqttProperties;
 import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
@@ -24,7 +25,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
-import org.eclipse.paho.client.mqttv3.MqttCallback;
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.springframework.stereotype.Component;
@@ -35,10 +36,12 @@ import org.springframework.stereotype.Component;
 public class MqttSubscriber {
 
     private final MqttClient mqttClient;
+    private final MqttProperties mqttProperties;
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
     private final ControlCommandMapper controlCommandMapper;
     private final AlarmRecordMapper alarmRecordMapper;
+    private final SystemEventPublisher systemEventPublisher;
     private final DecisionEngine decisionEngine;
     private final AlarmRecordService alarmRecordService;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
@@ -59,7 +62,14 @@ public class MqttSubscriber {
 
     @PostConstruct
     public void init() {
-        mqttClient.setCallback(new MqttCallback() {
+        mqttClient.setCallback(new MqttCallbackExtended() {
+            @Override
+            public void connectComplete(boolean reconnect, String serverURI) {
+                log.info("MQTT connected (reconnect={}), server={}", reconnect, serverURI);
+                // 必须在新线程里订阅，否则会阻塞 Paho 内部回调线程导致 publish() 死锁
+                new Thread(() -> subscribeTopics(), "mqtt-resubscribe").start();
+            }
+
             @Override
             public void connectionLost(Throwable cause) {
                 log.warn("MQTT connection lost: {}", cause.getMessage());
@@ -164,12 +174,17 @@ public class MqttSubscriber {
             }
         });
 
+        subscribeTopics();
+    }
+
+    private void subscribeTopics() {
         try {
-            mqttClient.subscribe("streetlight/+/heartbeat", 1);
-            mqttClient.subscribe("streetlight/+/telemetry", 1);
-            mqttClient.subscribe("streetlight/+/vision/event", 1);
-            mqttClient.subscribe("streetlight/+/voice/event", 1);
-            mqttClient.subscribe("streetlight/+/command/ack", 1);
+            String prefix = mqttProperties.getTopicPrefix();
+            mqttClient.subscribe(prefix + "/+/heartbeat", 1);
+            mqttClient.subscribe(prefix + "/+/telemetry", 1);
+            mqttClient.subscribe(prefix + "/+/vision/event", 1);
+            mqttClient.subscribe(prefix + "/+/voice/event", 1);
+            mqttClient.subscribe(prefix + "/+/command/ack", 1);
             log.info("MQTT subscriber ready, topics=heartbeat,telemetry,vision/event,voice/event,command/ack");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
@@ -210,6 +225,7 @@ public class MqttSubscriber {
                 alarm.setReason("传感器数据异常: " + reason);
                 alarm.setStartAt(now);
                 alarmRecordMapper.insert(alarm);
+                systemEventPublisher.publishAlarmEvent("created", alarm);
                 log.warn("[{}] FAULT alarm created: {}", deviceId, reason);
             }
         } else {

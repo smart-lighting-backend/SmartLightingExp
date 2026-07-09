@@ -11,6 +11,7 @@ import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.AuditLog;
 import com.experiment.smartlightingexp.mapper.AlarmRecordMapper;
 import com.experiment.smartlightingexp.mapper.AuditLogMapper;
+import com.experiment.smartlightingexp.mqtt.SystemEventPublisher;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class AlarmController {
     private final AlarmRecordService alarmRecordService;
     private final AlarmRecordMapper alarmRecordMapper;
     private final AuditLogMapper auditLogMapper;
+    private final SystemEventPublisher systemEventPublisher;
 
     // ======================== 查询 ========================
 
@@ -89,6 +91,7 @@ public class AlarmController {
             alarm.setStatus("ACTIVE");
         }
         alarmRecordService.save(alarm);
+        systemEventPublisher.publishAlarmEvent("created", alarm);
 
         saveAuditLog("ALARM_CREATE", "ALARM", String.valueOf(alarm.getId()),
                 "新增告警-" + alarm.getType() + ":" + alarm.getReason(), "SUCCESS", httpRequest);
@@ -171,6 +174,7 @@ public class AlarmController {
 
         String remark = body != null ? body.getOrDefault("remark", "") : "";
         alarmRecordService.updateById(existing);
+        systemEventPublisher.publishAlarmEvent("acknowledged", existing);
 
         String detail = "处理告警-" + existing.getType()
                 + (remark.isEmpty() ? "" : ", 备注:" + remark);
@@ -206,6 +210,9 @@ public class AlarmController {
             alarm.setRecoverAt(now);
         }
         alarmRecordService.updateBatchById(list);
+        for (AlarmRecord alarm : list) {
+            systemEventPublisher.publishAlarmEvent("acknowledged", alarm);
+        }
 
         saveAuditLog("ALARM_BATCH_HANDLE", "ALARM",
                 ids.stream().map(String::valueOf).collect(Collectors.joining(",")),

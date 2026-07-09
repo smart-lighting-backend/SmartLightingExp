@@ -18,7 +18,7 @@ public class TdengineConfig {
         config.setMaximumPoolSize(5);
         config.setMinimumIdle(1);
         config.setConnectionTimeout(10000);
-        config.setInitializationFailTimeout(-1);
+        config.setInitializationFailTimeout(0);
         HikariDataSource ds = new HikariDataSource(config);
         return new JdbcTemplate(ds);
     }

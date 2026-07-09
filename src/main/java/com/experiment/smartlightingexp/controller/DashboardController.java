@@ -434,7 +434,7 @@ public class DashboardController {
 
     /**
      * 最近 N 条边缘决策记录，支持按设备筛选。
-     * GET /api/dashboard/edge/recent?deviceId=SL-001&limit=50
+     * GET /api/dashboard/edge/recent?deviceId=SL_001&limit=50
      */
     @RequirePermission("dashboard:read")
     @GetMapping("/edge/recent")

@@ -13,6 +13,7 @@ import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
+import com.experiment.smartlightingexp.config.MqttProperties;
 import com.experiment.smartlightingexp.mqtt.MqttPublisher;
 import com.experiment.smartlightingexp.service.AuditLogService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +47,7 @@ public class ControlController {
     private final DeviceMapper deviceMapper;
     private final ControlCommandMapper controlCommandMapper;
     private final MqttPublisher mqttPublisher;
+    private final MqttProperties mqttProperties;
     private final ObjectMapper objectMapper;
     private final AuditLogService auditLogService;
 
@@ -99,7 +101,7 @@ public class ControlController {
         cmdPayload.put("operator", operator);
         try {
             mqttPublisher.publish(
-                    "streetlight/" + deviceId + "/command",
+                    mqttProperties.getTopicPrefix() + "/" + deviceId + "/command",
                     objectMapper.writeValueAsString(cmdPayload),
                     1);
         } catch (Exception e) {
@@ -316,7 +318,7 @@ public class ControlController {
         cmdPayload.put("source", "MANUAL");
         cmdPayload.put("operator", operator);
         mqttPublisher.publish(
-                "streetlight/" + device.getDeviceId() + "/command",
+                mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/command",
                 objectMapper.writeValueAsString(cmdPayload),
                 1);
 

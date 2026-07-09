@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.task;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
+import com.experiment.smartlightingexp.mqtt.SystemEventPublisher;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
 import com.experiment.smartlightingexp.tdengine.TelemetryDao;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -45,6 +46,7 @@ public class HealthScoreTask {
     private final ControlCommandMapper controlCommandMapper;
     private final ObjectMapper objectMapper;
     private final AlarmRecordService alarmRecordService;
+    private final SystemEventPublisher systemEventPublisher;
 
     private final Random random = new Random();
 
@@ -96,6 +98,7 @@ public class HealthScoreTask {
                         alarm.setReason("健康分降至 " + total + "，低于阈值 " + HEALTH_THRESHOLD);
                         alarm.setStartAt(LocalDateTime.now());
                         alarmRecordMapper.insert(alarm);
+                        systemEventPublisher.publishAlarmEvent("created", alarm);
                         log.warn("[{}] HEALTH_LOW alarm created (score={})", device.getDeviceId(), total);
                     }
                 } else {
@@ -126,17 +129,7 @@ public class HealthScoreTask {
 
     // ───────────── 维度 2：通信质量 (25%) ─────────────
     int calcCommunicationScore(String deviceId) {
-        List<Telemetry> list;
-        try {
-            list = telemetryDao.query24h(deviceId);
-        } catch (DataAccessException e) {
-            log.warn("TDengine 不可用，降级到 MySQL: {}", e.getMessage());
-            list = telemetryMapper.selectList(
-                    new LambdaQueryWrapper<Telemetry>()
-                            .eq(Telemetry::getDeviceId, deviceId)
-                            .ge(Telemetry::getCreateTime, LocalDateTime.now().minusHours(24))
-                            .orderByAsc(Telemetry::getCreateTime));
-        }
+        List<Telemetry> list = telemetryDao.query24h(deviceId);
         if (list == null || list.size() < 3) return 0;
 
         List<Double> gaps = new ArrayList<>();

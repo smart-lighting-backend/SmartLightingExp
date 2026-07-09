@@ -84,41 +84,22 @@ public class TelemetryController {
     @RequirePermission("telemetry:read")
     @PostMapping("/history")
     public Result<IPage<Telemetry>> getHistory(@RequestBody TelemetryQueryRequest request) {
-        try {
-            List<Telemetry> records = telemetryDao.queryHistory(
-                    blankToNull(request.getDeviceId()),
-                    request.getCollectedAtFrom(),
-                    request.getCollectedAtTo(),
-                    request.getPage(),
-                    request.getSize());
-            long total = telemetryDao.countHistory(
-                    blankToNull(request.getDeviceId()),
-                    request.getCollectedAtFrom(),
-                    request.getCollectedAtTo());
+        List<Telemetry> records = telemetryDao.queryHistory(
+                blankToNull(request.getDeviceId()),
+                request.getCollectedAtFrom(),
+                request.getCollectedAtTo(),
+                request.getPage(),
+                request.getSize());
+        long total = telemetryDao.countHistory(
+                blankToNull(request.getDeviceId()),
+                request.getCollectedAtFrom(),
+                request.getCollectedAtTo());
 
-            Page<Telemetry> page = new Page<>(request.getPage(), request.getSize());
-            page.setRecords(records);
-            page.setTotal(total);
-            log.info("[遥测历史-TD] deviceId={}, 结果数={}", request.getDeviceId(), records.size());
-            return Result.success(page);
-        } catch (DataAccessException e) {
-            log.warn("TDengine 不可用，降级到 MySQL: {}", e.getMessage());
-            LambdaQueryWrapper<Telemetry> wrapper = new LambdaQueryWrapper<>();
-            if (request.getDeviceId() != null && !request.getDeviceId().isBlank()) {
-                wrapper.eq(Telemetry::getDeviceId, request.getDeviceId());
-            }
-            if (request.getCollectedAtFrom() != null) {
-                wrapper.ge(Telemetry::getCollectedAt, request.getCollectedAtFrom());
-            }
-            if (request.getCollectedAtTo() != null) {
-                wrapper.le(Telemetry::getCollectedAt, request.getCollectedAtTo());
-            }
-            wrapper.orderByDesc(Telemetry::getCollectedAt);
-            Page<Telemetry> page = new Page<>(request.getPage(), request.getSize());
-            IPage<Telemetry> result = telemetryService.page(page, wrapper);
-            log.info("[遥测历史-MySQL] deviceId={}, 结果数={}", request.getDeviceId(), result.getRecords().size());
-            return Result.success(result);
-        }
+        Page<Telemetry> page = new Page<>(request.getPage(), request.getSize());
+        page.setRecords(records);
+        page.setTotal(total);
+        log.info("[遥测历史-TD] deviceId={}, 结果数={}", request.getDeviceId(), records.size());
+        return Result.success(page);
     }
 
     private static String blankToNull(String s) {

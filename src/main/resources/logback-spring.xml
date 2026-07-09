@@ -13,7 +13,7 @@
     <logger name="com.baomidou.mybatisplus" level="WARN"/>
     <logger name="com.zaxxer.hikari" level="WARN"/>
     <logger name="org.apache.catalina" level="WARN"/>
-    <logger name="org.eclipse.paho" level="WARN"/>
+    <logger name="org.eclipse.paho" level="INFO"/>
 
     <!-- 静默处理：心跳、遥测接收日志 → WARN（仅异常时输出） -->
     <logger name="com.experiment.smartlightingexp.task.HeartbeatMonitorTask" level="WARN"/>

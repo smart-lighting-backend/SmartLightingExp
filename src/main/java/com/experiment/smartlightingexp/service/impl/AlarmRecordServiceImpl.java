@@ -10,6 +10,7 @@ import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.mapper.AlarmRecordMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
+import com.experiment.smartlightingexp.mqtt.SystemEventPublisher;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +39,7 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
 
     private final AlarmRecordMapper alarmRecordMapper;
     private final DeviceMapper deviceMapper;
+    private final SystemEventPublisher systemEventPublisher;
 
     @Value("${heartbeat.offline-threshold-seconds:300}")
     private int offlineThresholdSeconds;
@@ -146,6 +148,7 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
             alarm.setStatus(ALARM_STATUS_RECOVERED);
             alarm.setRecoverAt(LocalDateTime.now());
             alarmRecordMapper.updateById(alarm);
+            systemEventPublisher.publishAlarmEvent("resolved", alarm);
             log.warn("  [{}] OFFLINE alarm resolved (id={})", deviceId, alarm.getId());
         }
     }
@@ -167,6 +170,7 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
             alarm.setStatus(ALARM_STATUS_RECOVERED);
             alarm.setRecoverAt(LocalDateTime.now());
             alarmRecordMapper.updateById(alarm);
+            systemEventPublisher.publishAlarmEvent("resolved", alarm);
             log.info("[{}] HEALTH_LOW alarm resolved (id={})", deviceId, alarm.getId());
         }
     }
@@ -188,6 +192,7 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
             alarm.setStatus(ALARM_STATUS_RECOVERED);
             alarm.setRecoverAt(LocalDateTime.now());
             alarmRecordMapper.updateById(alarm);
+            systemEventPublisher.publishAlarmEvent("resolved", alarm);
             log.info("[{}] FAULT alarm resolved (id={})", deviceId, alarm.getId());
         }
     }

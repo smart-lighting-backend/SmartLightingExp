@@ -22,11 +22,11 @@ public class MqttConfig {
 
         MqttConnectOptions options = new MqttConnectOptions();
         options.setAutomaticReconnect(true);
-        options.setCleanSession(true);
-        options.setConnectionTimeout(60);
-        options.setExecutorServiceTimeout(60);
-        options.setKeepAliveInterval(60);
-        options.setMaxInflight(200);
+        options.setCleanSession(true); // true 避免僵尸 session，重启后重新订阅
+        options.setConnectionTimeout(10);
+        options.setExecutorServiceTimeout(10);
+        options.setKeepAliveInterval(15);
+        options.setMaxInflight(50);
         options.setUserName(props.getUsername());
         options.setPassword(props.getPassword().toCharArray());
 

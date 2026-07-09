@@ -5,6 +5,7 @@ import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.mapper.AlarmRecordMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
+import com.experiment.smartlightingexp.mqtt.SystemEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,6 +33,7 @@ public class HeartbeatMonitorTask {
 
     private final DeviceMapper deviceMapper;
     private final AlarmRecordMapper alarmRecordMapper;
+    private final SystemEventPublisher systemEventPublisher;
 
     @Value("${heartbeat.offline-threshold-seconds:300}")
     private int offlineThresholdSeconds;
@@ -89,6 +91,7 @@ public class HeartbeatMonitorTask {
                         + " 秒，最后心跳时间：" + device.getLastHeartbeatAt());
                 alarm.setStartAt(LocalDateTime.now());
                 alarmRecordMapper.insert(alarm);
+                systemEventPublisher.publishAlarmEvent("created", alarm);
                 alarmCount++;
 
                 log.warn("设备离线 [{}], 心跳中断{}秒", device.getDeviceId(), elapsedSeconds);
