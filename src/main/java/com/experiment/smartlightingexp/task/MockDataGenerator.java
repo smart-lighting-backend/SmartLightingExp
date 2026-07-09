@@ -37,12 +37,12 @@ public class MockDataGenerator {
     private final Random random = new Random();
 
     /**
-     * 模拟数据生成任务 — 启动 20s 后首次执行，之后每 5 分钟一次。
+     * 模拟数据生成任务 — 启动 15s 后首次执行，之后每 30 秒一次。
      * 查询数据库中所有启用的设备，为每台设备生成随机遥测数据，
      * 通过 MQTT 发布到 streetlight/{deviceId}/telemetry，
      * 由 {@link com.experiment.smartlightingexp.mqtt.MqttSubscriber} 订阅后写入数据库。
      */
-    @Scheduled(initialDelay = 20000, fixedRate = 300000)
+    @Scheduled(initialDelay = 15000, fixedRate = 30000)
     public void generateData() {
         // 只查询已启用且未删除的设备
         LambdaQueryWrapper<Device> query = new LambdaQueryWrapper<Device>()
@@ -84,19 +84,19 @@ public class MockDataGenerator {
             }
 
             // 视觉事件生成：基于传感器数据触发
-            if (pir == 1 && random.nextDouble() < 0.3) {
+            if (pir == 1 && random.nextDouble() < 0.5) {
                 publishVisionEvent(device.getDeviceId(), "行人检测", 0.70 + 0.29 * random.nextDouble());
             }
-            if (trafficFlow > 10 && random.nextDouble() < 0.4) {
+            if (trafficFlow > 10 && random.nextDouble() < 0.5) {
                 publishVisionEvent(device.getDeviceId(), "车辆通行", 0.70 + 0.29 * random.nextDouble());
             }
-            if (random.nextDouble() < 0.05) {
+            if (random.nextDouble() < 0.08) {
                 String rareType = random.nextBoolean() ? "异常停车" : "危险场景";
                 publishVisionEvent(device.getDeviceId(), rareType, 0.60 + 0.39 * random.nextDouble());
             }
 
-            // 语音事件生成：10% 随机概率
-            if (random.nextDouble() < 0.1) {
+            // 语音事件生成：20% 随机概率
+            if (random.nextDouble() < 0.2) {
                 publishVoiceEvent(device.getDeviceId());
             }
         }

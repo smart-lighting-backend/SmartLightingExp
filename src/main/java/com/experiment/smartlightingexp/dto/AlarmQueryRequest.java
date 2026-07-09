@@ -17,10 +17,10 @@ public class AlarmQueryRequest {
     /** 设备ID（模糊匹配） */
     private String deviceId;
 
-    /** 告警类型：OFFLINE / HEALTH_LOW / VISION_ABNORMAL / OVER_TEMP */
+    /** 告警类型：OFFLINE / FAULT / HEALTH_LOW */
     private String type;
 
-    /** 告警级别：MAJOR / MINOR / CRITICAL */
+    /** 告警级别：CRITICAL / MAJOR / WARNING */
     private String level;
 
     /** 告警状态：ACTIVE / RECOVERED / ACKNOWLEDGED */

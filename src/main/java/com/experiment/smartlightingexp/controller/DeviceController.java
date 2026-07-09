@@ -9,6 +9,7 @@ import com.experiment.smartlightingexp.common.SecurityContext;
 import com.experiment.smartlightingexp.dto.*;
 import com.experiment.smartlightingexp.entity.*;
 import com.experiment.smartlightingexp.mapper.*;
+import com.experiment.smartlightingexp.mqtt.MqttPublisher;
 import com.experiment.smartlightingexp.service.*;
 import com.experiment.smartlightingexp.tdengine.TelemetryDao;
 import com.experiment.smartlightingexp.tdengine.VisionEventDao;
@@ -48,6 +49,7 @@ public class DeviceController {
     private final DeviceService deviceService;
     private final AuditLogMapper auditLogMapper;
     private final DeviceAreaMapper deviceAreaMapper;
+    private final MqttPublisher mqttPublisher;
 
     /**
      * 组合条件分页查询设备列表。
@@ -1120,6 +1122,67 @@ public class DeviceController {
         }
         result.put("recentAlarms", alarmList);
 
+        return Result.success(result);
+    }
+
+    /**
+     * 故障模拟 — 向随机（或指定）在线设备发布异常遥测数据，触发 FAULT 告警。
+     * 连续发布 2 条异常遥测以满足连续计数防抖阈值。
+     */
+    @RequirePermission("device:control")
+    @PostMapping("/fault-simulate")
+    public Result<Map<String, Object>> faultSimulate(@RequestParam(required = false) String deviceId) {
+        // 选取目标设备
+        Device target;
+        if (deviceId != null && !deviceId.isBlank()) {
+            target = deviceService.lambdaQuery()
+                    .eq(Device::getDeviceId, deviceId)
+                    .eq(Device::getDeleted, false).one();
+            if (target == null) return Result.error("设备不存在: " + deviceId);
+        } else {
+            List<Device> onlineDevices = deviceService.lambdaQuery()
+                    .eq(Device::getEnabled, true)
+                    .eq(Device::getDeleted, false)
+                    .eq(Device::getStatus, 1)
+                    .last("LIMIT 50").list();
+            if (onlineDevices.isEmpty()) {
+                return Result.error("无在线设备可用于故障模拟");
+            }
+            target = onlineDevices.get(new Random().nextInt(onlineDevices.size()));
+        }
+
+        // 构造异常遥测 JSON（所有传感器值设为 999，明显超出正常范围）
+        Map<String, Object> faultTelemetry = new LinkedHashMap<>();
+        faultTelemetry.put("deviceId", target.getDeviceId());
+        faultTelemetry.put("illuminance", 999);
+        faultTelemetry.put("temperature", 999);
+        faultTelemetry.put("humidity", 999);
+        faultTelemetry.put("pm25", 999);
+        faultTelemetry.put("aqi", 999);
+        faultTelemetry.put("pir", 999);
+        faultTelemetry.put("trafficFlow", 999);
+        faultTelemetry.put("collectedAt", LocalDateTime.now().toString());
+
+        String topic = (target.getTopicPrefix() != null ? target.getTopicPrefix() : "streetlight")
+                + "/" + target.getDeviceId() + "/telemetry";
+        String payload;
+        try {
+            payload = objectMapper.writeValueAsString(faultTelemetry);
+        } catch (JsonProcessingException e) {
+            return Result.error("JSON 序列化失败: " + e.getMessage());
+        }
+
+        // 连续发布 2 条以满足连续异常阈值
+        mqttPublisher.publish(topic, payload, 1);
+        try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+        mqttPublisher.publish(topic, payload, 1);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deviceId", target.getDeviceId());
+        result.put("deviceName", target.getName());
+        result.put("topic", topic);
+        result.put("faultValues", faultTelemetry);
+        log.info("[故障模拟] 设备={}, 异常遥测已发布 (×2)", target.getDeviceId());
         return Result.success(result);
     }
 }

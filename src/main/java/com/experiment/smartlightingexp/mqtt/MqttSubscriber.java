@@ -1,20 +1,26 @@
 package com.experiment.smartlightingexp.mqtt;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.Telemetry;
+import com.experiment.smartlightingexp.mapper.AlarmRecordMapper;
 import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.engine.DecisionEngine;
 import com.experiment.smartlightingexp.service.AlarmRecordService;
+import com.experiment.smartlightingexp.util.SensorValidator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -32,9 +38,24 @@ public class MqttSubscriber {
     private final ObjectMapper objectMapper;
     private final DeviceMapper deviceMapper;
     private final ControlCommandMapper controlCommandMapper;
+    private final AlarmRecordMapper alarmRecordMapper;
     private final DecisionEngine decisionEngine;
     private final AlarmRecordService alarmRecordService;
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
+
+    /** 遥测异常连续计数：deviceId → FaultCounter */
+    private final ConcurrentHashMap<String, FaultCounter> faultCounters = new ConcurrentHashMap<>();
+
+    /** 连续异常次数阈值，达到后产生 FAULT 告警 */
+    private static final int FAULT_ABNORMAL_THRESHOLD = 2;
+    /** 连续正常次数阈值，达到后恢复 FAULT 告警 */
+    private static final int FAULT_NORMAL_THRESHOLD = 2;
+
+    private static class FaultCounter {
+        int abnormalCount = 0;
+        int normalCount = 0;
+        List<SensorValidator.AbnormalField> lastAbnormalFields;
+    }
 
     @PostConstruct
     public void init() {
@@ -96,6 +117,9 @@ public class MqttSubscriber {
                             log.info("遥测处理 [{}]: lux={}, temp={}°C", telemetryDeviceId, telemetry.getIlluminance(), telemetry.getTemperature());
                             LocalDateTime now = LocalDateTime.now();
 
+                            // ─── 传感器异常检测 → FAULT 告警 ───
+                            detectFault(telemetryDeviceId, telemetry, now);
+
                             Device device = deviceMapper.selectOne(
                                     Wrappers.<Device>lambdaQuery().eq(Device::getDeviceId, telemetryDeviceId));
                             boolean inManual = device != null
@@ -149,6 +173,53 @@ public class MqttSubscriber {
             log.info("MQTT subscriber ready, topics=heartbeat,telemetry,vision/event,voice/event,command/ack");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 遥测传感器异常检测 → FAULT 告警（带连续计数防抖）。
+     * 连续 {@value #FAULT_ABNORMAL_THRESHOLD} 次异常触发告警，
+     * 连续 {@value #FAULT_NORMAL_THRESHOLD} 次正常自动恢复。
+     */
+    private void detectFault(String deviceId, Telemetry telemetry, LocalDateTime now) {
+        Map<String, Object> fieldValues = SensorValidator.extractFieldValues(telemetry);
+        List<SensorValidator.AbnormalField> abnormalFields = SensorValidator.validate(fieldValues);
+
+        FaultCounter counter = faultCounters.computeIfAbsent(deviceId, k -> new FaultCounter());
+
+        if (!abnormalFields.isEmpty()) {
+            counter.abnormalCount++;
+            counter.normalCount = 0;
+            counter.lastAbnormalFields = abnormalFields;
+
+            log.warn("[{}] 遥测异常 (连续{}/{}): {}", deviceId,
+                    counter.abnormalCount, FAULT_ABNORMAL_THRESHOLD,
+                    abnormalFields.stream().map(SensorValidator.AbnormalField::description)
+                            .collect(Collectors.joining("; ")));
+
+            if (counter.abnormalCount >= FAULT_ABNORMAL_THRESHOLD
+                    && alarmRecordService.findActiveFaultAlarm(deviceId) == null) {
+                String reason = abnormalFields.stream()
+                        .map(SensorValidator.AbnormalField::description)
+                        .collect(Collectors.joining("; "));
+                AlarmRecord alarm = new AlarmRecord();
+                alarm.setDeviceId(deviceId);
+                alarm.setType("FAULT");
+                alarm.setLevel("CRITICAL");
+                alarm.setStatus("ACTIVE");
+                alarm.setReason("传感器数据异常: " + reason);
+                alarm.setStartAt(now);
+                alarmRecordMapper.insert(alarm);
+                log.warn("[{}] FAULT alarm created: {}", deviceId, reason);
+            }
+        } else {
+            counter.abnormalCount = 0;
+            if (counter.normalCount < FAULT_NORMAL_THRESHOLD) {
+                counter.normalCount++;
+            }
+            if (counter.normalCount >= FAULT_NORMAL_THRESHOLD) {
+                alarmRecordService.resolveFaultAlarm(deviceId);
+            }
         }
     }
 }

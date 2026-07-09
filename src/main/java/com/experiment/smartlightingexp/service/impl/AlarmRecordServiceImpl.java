@@ -48,7 +48,7 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
                 Wrappers.<AlarmRecord>lambdaQuery()
                         .eq(AlarmRecord::getDeviceId, deviceId)
                         .eq(AlarmRecord::getType, "OFFLINE")
-                        .eq(AlarmRecord::getStatus, "ACTIVE")
+                        .in(AlarmRecord::getStatus, List.of(ALARM_STATUS_ACTIVE, "ACKNOWLEDGED"))
                         .last("LIMIT 1"));
     }
 
@@ -156,7 +156,7 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
                 Wrappers.<AlarmRecord>lambdaQuery()
                         .eq(AlarmRecord::getDeviceId, deviceId)
                         .eq(AlarmRecord::getType, "HEALTH_LOW")
-                        .eq(AlarmRecord::getStatus, ALARM_STATUS_ACTIVE)
+                        .in(AlarmRecord::getStatus, List.of(ALARM_STATUS_ACTIVE, "ACKNOWLEDGED"))
                         .last("LIMIT 1"));
     }
 
@@ -168,6 +168,27 @@ public class AlarmRecordServiceImpl extends ServiceImpl<AlarmRecordMapper, Alarm
             alarm.setRecoverAt(LocalDateTime.now());
             alarmRecordMapper.updateById(alarm);
             log.info("[{}] HEALTH_LOW alarm resolved (id={})", deviceId, alarm.getId());
+        }
+    }
+
+    @Override
+    public AlarmRecord findActiveFaultAlarm(String deviceId) {
+        return alarmRecordMapper.selectOne(
+                Wrappers.<AlarmRecord>lambdaQuery()
+                        .eq(AlarmRecord::getDeviceId, deviceId)
+                        .eq(AlarmRecord::getType, "FAULT")
+                        .in(AlarmRecord::getStatus, List.of(ALARM_STATUS_ACTIVE, "ACKNOWLEDGED"))
+                        .last("LIMIT 1"));
+    }
+
+    @Override
+    public void resolveFaultAlarm(String deviceId) {
+        AlarmRecord alarm = findActiveFaultAlarm(deviceId);
+        if (alarm != null) {
+            alarm.setStatus(ALARM_STATUS_RECOVERED);
+            alarm.setRecoverAt(LocalDateTime.now());
+            alarmRecordMapper.updateById(alarm);
+            log.info("[{}] FAULT alarm resolved (id={})", deviceId, alarm.getId());
         }
     }
 
