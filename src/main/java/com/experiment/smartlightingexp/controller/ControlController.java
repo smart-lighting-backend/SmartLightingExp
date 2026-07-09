@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.experiment.smartlightingexp.common.RequirePermission;
 import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.common.SecurityContext;
+import com.experiment.smartlightingexp.dto.BatchDeviceRequest;
 import com.experiment.smartlightingexp.dto.ControlRequest;
 import com.experiment.smartlightingexp.entity.AuditLog;
 import com.experiment.smartlightingexp.entity.ControlCommand;
@@ -23,9 +24,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 手动控制控制器 — 开灯、关灯、调光。
@@ -131,6 +137,26 @@ public class ControlController {
     }
 
     /**
+     * 批量开灯。
+     */
+    @RequirePermission("device:control")
+    @PutMapping("/batch-turn-on")
+    public Result<Map<String, Object>> batchTurnOn(@RequestBody @Valid BatchDeviceRequest request,
+                                                   HttpServletRequest httpRequest) {
+        return batchControl(request, "ON", httpRequest);
+    }
+
+    /**
+     * 批量关灯。
+     */
+    @RequirePermission("device:control")
+    @PutMapping("/batch-turn-off")
+    public Result<Map<String, Object>> batchTurnOff(@RequestBody @Valid BatchDeviceRequest request,
+                                                    HttpServletRequest httpRequest) {
+        return batchControl(request, "OFF", httpRequest);
+    }
+
+    /**
      * 查询设备控制历史（分页）。
      * 复用 control_command 表，按下发时间倒序排列。
      */
@@ -211,6 +237,137 @@ public class ControlController {
         }
         return 100;
     }
+    /**
+     * 批量控制设备灯光。
+     */
+    private Result<Map<String, Object>> batchControl(BatchDeviceRequest request,
+                                                     String action,
+                                                     HttpServletRequest httpRequest) {
+        List<Long> ids = normalizeDeviceIds(request.getDeviceIds());
+        if (ids.isEmpty()) {
+            return Result.error(400, "设备ID列表不能为空");
+        }
+
+        List<Device> devices = deviceMapper.selectList(
+                Wrappers.<Device>lambdaQuery()
+                        .in(Device::getId, ids)
+                        .eq(Device::getDeleted, false));
+        if (devices.isEmpty()) {
+            saveAuditLog(batchControlAuditAction(action), "DEVICE", ids.toString(),
+                    "未找到可控制设备-批量" + batchControlActionName(action) + "失败", "FAIL", httpRequest);
+            return Result.error(404, "未找到可控制设备");
+        }
+
+        Set<Long> foundIds = devices.stream().map(Device::getId).collect(Collectors.toSet());
+        List<Map<String, Object>> failedDetails = new ArrayList<>();
+        for (Long id : ids) {
+            if (!foundIds.contains(id)) {
+                Map<String, Object> failed = new LinkedHashMap<>();
+                failed.put("id", id);
+                failed.put("reason", "设备不存在或已删除");
+                failedDetails.add(failed);
+            }
+        }
+
+        String operator = SecurityContext.getCurrentUsername();
+        if (operator == null) {
+            operator = "UNKNOWN";
+        }
+
+        int success = 0;
+        for (Device device : devices) {
+            ControlRequest controlRequest = new ControlRequest();
+            controlRequest.setAction(action);
+            try {
+                issueManualControl(device, controlRequest, operator, LocalDateTime.now());
+                success++;
+            } catch (Exception e) {
+                log.error("[{}] Batch manual control {} failed: {}", device.getDeviceId(), action, e.getMessage());
+                Map<String, Object> failed = new LinkedHashMap<>();
+                failed.put("id", device.getId());
+                failed.put("deviceId", device.getDeviceId());
+                failed.put("reason", e.getMessage());
+                failedDetails.add(failed);
+            }
+        }
+
+        if (success == 0) {
+            saveAuditLog(batchControlAuditAction(action), "DEVICE", ids.toString(),
+                    "批量" + batchControlActionName(action) + "失败", "FAIL", httpRequest);
+            return Result.error(500, "批量" + batchControlActionName(action) + "失败");
+        }
+
+        saveAuditLog(batchControlAuditAction(action), "DEVICE", ids.toString(),
+                "批量" + batchControlActionName(action) + "-" + success + "台", "SUCCESS", httpRequest);
+        log.info("[设备] 批量{}: 请求数={}, 成功={}, 失败={}",
+                batchControlActionName(action), ids.size(), success, ids.size() - success);
+        return Result.success(batchControlResult(ids.size(), success, failedDetails));
+    }
+
+    private void issueManualControl(Device device, ControlRequest request,
+                                    String operator, LocalDateTime now) throws Exception {
+        String cmdStr = "DIMMING".equals(request.getAction())
+                ? "DIMMING(" + request.getBrightness() + ")"
+                : request.getAction();
+
+        Map<String, Object> cmdPayload = new HashMap<>();
+        cmdPayload.put("action", cmdStr);
+        cmdPayload.put("issuedAt", now.toString());
+        cmdPayload.put("source", "MANUAL");
+        cmdPayload.put("operator", operator);
+        mqttPublisher.publish(
+                "streetlight/" + device.getDeviceId() + "/command",
+                objectMapper.writeValueAsString(cmdPayload),
+                1);
+
+        ControlCommand cmd = new ControlCommand();
+        cmd.setDeviceId(device.getDeviceId());
+        cmd.setAction(cmdStr);
+        cmd.setBrightness("DIMMING".equals(request.getAction()) ? request.getBrightness() : null);
+        cmd.setSource("MANUAL");
+        cmd.setOperator(operator);
+        cmd.setStatus("SENT");
+        cmd.setIssuedAt(now);
+        cmd.setResultDetail("手动控制-" + cmdStr);
+        controlCommandMapper.insert(cmd);
+
+        deviceMapper.update(null,
+                new LambdaUpdateWrapper<Device>()
+                        .eq(Device::getDeviceId, device.getDeviceId())
+                        .set(Device::getLatestData, buildManualControlLatestData(device, request, cmdStr, now))
+                        .set(Device::getLastManualAt, now)
+                        .set(Device::getManualMode, true)
+                        .set(Device::getManualExpireAt, now.plusMinutes(manualLockDurationMinutes)));
+    }
+
+    private List<Long> normalizeDeviceIds(List<Long> deviceIds) {
+        if (deviceIds == null) {
+            return List.of();
+        }
+        return deviceIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> batchControlResult(int total, int success,
+                                                   List<Map<String, Object>> failedDetails) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", total);
+        result.put("success", success);
+        result.put("failed", total - success);
+        result.put("failedDetails", failedDetails);
+        return result;
+    }
+
+    private String batchControlActionName(String action) {
+        return "ON".equals(action) ? "开灯" : "关灯";
+    }
+
+    private String batchControlAuditAction(String action) {
+        return "ON".equals(action) ? "DEVICE_BATCH_TURN_ON" : "DEVICE_BATCH_TURN_OFF";
+    }
+
     /**
      * 记录审计日志。
      */
