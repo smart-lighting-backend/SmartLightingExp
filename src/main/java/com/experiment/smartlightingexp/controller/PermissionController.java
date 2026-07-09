@@ -33,7 +33,8 @@ public class PermissionController {
     static final Set<String> HIDDEN_PERMISSION_CODES = Set.of(
             "menu:create", "menu:delete",
             "permission:create", "permission:delete",
-            "role:read", "role:create", "role:delete"
+            "role:read", "role:create", "role:delete",
+            "alarm:delete"
     );
 
     /**
