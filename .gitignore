@@ -38,5 +38,9 @@ application-local.properties
 ### Config ###
 配置相关/
 
+### Docs ###
+docs/知识库/
+docs/img.png
+
 ### VS Code ###
 .vscode/
