@@ -22,7 +22,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
@@ -301,6 +306,262 @@ public class DeviceController {
     }
 
     /**
+     * 批量导入设备 — 上传 Excel / CSV 文件解析并创建。
+     * <p>
+     * 支持列名自动匹配（中文/英文），与前端 BatchImport 解析逻辑一致。
+     * 复用与 /batch 相同的校验、去重、area→areaId 映射逻辑。
+     */
+    @RequirePermission("device:create")
+    @PostMapping("/batch/import")
+    public Result<Map<String, Object>> batchImport(@RequestParam("file") MultipartFile file,
+                                                   HttpServletRequest httpRequest) {
+        if (file.isEmpty()) {
+            return Result.error(400, "文件不能为空");
+        }
+
+        String filename = file.getOriginalFilename();
+        String ext = filename != null ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase() : "";
+        if (!"xlsx".equals(ext) && !"csv".equals(ext)) {
+            return Result.error(400, "仅支持 .xlsx、.csv 格式，当前: " + ext);
+        }
+
+        List<String[]> rows;
+        try {
+            if ("csv".equals(ext)) {
+                rows = parseCsvFile(file);
+            } else {
+                rows = parseXlsxFile(file);
+            }
+        } catch (Exception e) {
+            log.error("[设备] 文件解析失败: {}", e.getMessage(), e);
+            return Result.error(400, "文件解析失败: " + e.getMessage());
+        }
+
+        if (rows.size() < 2) {
+            return Result.error(400, "文件为空或只有表头");
+        }
+
+        // 解析表头 → 列索引映射（与前端 excelTemplate.js 一致）
+        Map<String, Integer> colMap = buildColumnMap(rows.get(0));
+
+        // 行数据 → Device 对象
+        List<Device> devices = new ArrayList<>();
+        for (int i = 1; i < rows.size(); i++) {
+            String[] row = rows.get(i);
+            String deviceId = getCell(row, colMap, "deviceId");
+            if (deviceId == null || deviceId.isBlank()) continue;
+
+            Device d = new Device();
+            d.setDeviceId(deviceId.trim());
+            d.setName(getCell(row, colMap, "name"));
+            d.setArea(getCell(row, colMap, "area"));
+            String lng = getCell(row, colMap, "longitude");
+            String lat = getCell(row, colMap, "latitude");
+            if (lng != null && !lng.isBlank() && lat != null && !lat.isBlank()) {
+                d.setLocation(lng.trim() + "," + lat.trim());
+            }
+            String power = getCell(row, colMap, "ratedPower");
+            if (power != null && !power.isBlank()) {
+                try { d.setRatedPower(new BigDecimal(power.trim())); } catch (Exception ignored) {}
+            }
+            devices.add(d);
+        }
+
+        if (devices.isEmpty()) {
+            return Result.error(400, "文件中未解析到有效设备数据");
+        }
+
+        // 以下逻辑与 batchCreate 完全一致
+        List<Map<String, Object>> failed = new ArrayList<>();
+        List<Device> toSave = new ArrayList<>();
+
+        Set<String> existingIds = new HashSet<>(deviceService.lambdaQuery()
+                .select(Device::getDeviceId).list().stream()
+                .map(Device::getDeviceId).toList());
+        Set<String> batchIds = new HashSet<>();
+
+        Map<String, Long> areaNameToId = new LinkedHashMap<>();
+        List<String> areaNames = devices.stream()
+                .map(Device::getArea).filter(a -> a != null && !a.isBlank()).distinct().toList();
+        if (!areaNames.isEmpty()) {
+            deviceAreaMapper.selectList(
+                    new LambdaQueryWrapper<DeviceArea>().in(DeviceArea::getName, areaNames))
+                    .forEach(a -> areaNameToId.put(a.getName(), a.getId()));
+        }
+
+        for (int i = 0; i < devices.size(); i++) {
+            Device d = devices.get(i);
+            int rowNum = i + 2; // 第 1 行是表头
+
+            if (d.getDeviceId() == null || d.getDeviceId().isBlank()) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", rowNum);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "设备编号不能为空");
+                failed.add(err);
+                continue;
+            }
+
+            if (existingIds.contains(d.getDeviceId()) || batchIds.contains(d.getDeviceId())) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", rowNum);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "设备编号重复");
+                failed.add(err);
+                continue;
+            }
+
+            batchIds.add(d.getDeviceId());
+            if (d.getStatus() == null) d.setStatus(1);
+            if (d.getEnabled() == null) d.setEnabled(true);
+            if (d.getHealthScore() == null) d.setHealthScore(new BigDecimal("100.00"));
+            if (d.getTopicPrefix() == null || d.getTopicPrefix().isBlank()) d.setTopicPrefix("streetlight");
+            if (d.getArea() != null && !d.getArea().isBlank()) {
+                Long areaId = areaNameToId.get(d.getArea());
+                if (areaId != null) d.setAreaId(areaId);
+            }
+            d.setDeleted(false);
+            toSave.add(d);
+        }
+
+        if (!toSave.isEmpty()) {
+            deviceService.saveBatch(toSave);
+            for (Device d : toSave) {
+                saveAuditLog("DEVICE_CREATE", "DEVICE", d.getDeviceId(),
+                        "文件导入-" + d.getName(), "SUCCESS", httpRequest);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", devices.size());
+        result.put("success", toSave.size());
+        result.put("failed", failed.size());
+        result.put("failedDetails", failed);
+        log.info("[设备] 文件导入: 总数={}, 成功={}, 失败={}", devices.size(), toSave.size(), failed.size());
+        return Result.success(result);
+    }
+
+    // ───────────── 文件解析工具方法 ─────────────
+
+    private static final String[][] IMPORT_FIELD_ALIASES = {
+        {"deviceId", "设备编号", "设备ID", "设备编码", "编号", "deviceId", "device_id", "id"},
+        {"name", "设备名称", "名称", "设备名", "name", "deviceName", "device_name"},
+        {"area", "所属区域", "区域", "分区", "area", "region"},
+        {"longitude", "经度", "longitude", "lng"},
+        {"latitude", "纬度", "latitude", "lat"},
+        {"ratedPower", "额定功率(W)", "额定功率", "功率", "ratedPower", "rated_power", "power"},
+    };
+
+    private Map<String, Integer> buildColumnMap(String[] headerRow) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        List<String> headers = new ArrayList<>();
+        for (String h : headerRow) {
+            headers.add(h == null ? "" : h.trim().toLowerCase().replaceAll("[\\s()（）]", ""));
+        }
+        for (String[] field : IMPORT_FIELD_ALIASES) {
+            String key = field[0];
+            int idx = -1;
+            for (int i = 0; i < headers.size(); i++) {
+                String h = headers.get(i);
+                for (int j = 1; j < field.length; j++) {
+                    if (h.equals(field[j].toLowerCase().replaceAll("[\\s()（）]", ""))) {
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx >= 0) break;
+            }
+            map.put(key, idx >= 0 ? idx : 0);
+        }
+        return map;
+    }
+
+    private String getCell(String[] row, Map<String, Integer> colMap, String key) {
+        Integer idx = colMap.get(key);
+        if (idx == null || idx >= row.length) return "";
+        String value = row[idx];
+        return value == null ? "" : value.replace("﻿", "").trim();
+    }
+
+    private List<String[]> parseCsvFile(MultipartFile file) throws Exception {
+        List<String[]> rows = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), "UTF-8"))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                // 简单 CSV 解析：处理引号包裹
+                rows.add(parseCsvLine(line));
+            }
+        }
+        return rows;
+    }
+
+    private String[] parseCsvLine(String line) {
+        List<String> cells = new ArrayList<>();
+        StringBuilder cell = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (ch == '"') {
+                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    cell.append('"');
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (ch == ',' && !inQuotes) {
+                cells.add(cell.toString());
+                cell.setLength(0);
+            } else {
+                cell.append(ch);
+            }
+        }
+        cells.add(cell.toString());
+        return cells.toArray(new String[0]);
+    }
+
+    private List<String[]> parseXlsxFile(MultipartFile file) throws Exception {
+        List<String[]> rows = new ArrayList<>();
+        try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+            for (int rowIdx = 0; rowIdx <= sheet.getLastRowNum(); rowIdx++) {
+                Row row = sheet.getRow(rowIdx);
+                if (row == null) continue;
+                int lastCol = Math.max(row.getLastCellNum(), 6);
+                String[] cells = new String[lastCol];
+                boolean hasValue = false;
+                for (int colIdx = 0; colIdx < lastCol; colIdx++) {
+                    Cell cell = row.getCell(colIdx);
+                    String val = cell == null ? "" : readCellValue(cell);
+                    cells[colIdx] = val;
+                    if (!val.isEmpty()) hasValue = true;
+                }
+                if (hasValue) rows.add(cells);
+            }
+        }
+        return rows;
+    }
+
+    private String readCellValue(Cell cell) {
+        switch (cell.getCellType()) {
+            case STRING: return cell.getStringCellValue().trim();
+            case NUMERIC: {
+                double v = cell.getNumericCellValue();
+                // 整数不显示小数点
+                if (v == Math.floor(v) && !Double.isInfinite(v)) {
+                    return String.valueOf((long) v);
+                }
+                return String.valueOf(v);
+            }
+            case BOOLEAN: return String.valueOf(cell.getBooleanCellValue());
+            case FORMULA:
+                try { return cell.getStringCellValue().trim(); } catch (Exception e) { return ""; }
+            default: return "";
+        }
+    }
+
+    // ───────────── 文件解析工具方法结束 ─────────────
+
+    /**
      * 更新设备信息。
      */
     @RequirePermission("device:update")
@@ -356,8 +617,28 @@ public class DeviceController {
     @PutMapping("/batch-area")
     public Result<Void> batchUpdateArea(@RequestBody @Valid BatchAreaRequest request,
                                         HttpServletRequest httpRequest) {
-        if (request.getDeviceIds().isEmpty()) {
-            return Result.error(400, "设备ID列表不能为空");
+        // 解析设备ID列表：优先使用 deviceCodes（移动端），否则使用 deviceIds（前端）
+        List<Long> ids;
+        if (request.getDeviceCodes() != null && !request.getDeviceCodes().isEmpty()) {
+            ids = deviceService.lambdaQuery()
+                    .select(Device::getId)
+                    .in(Device::getDeviceId, request.getDeviceCodes())
+                    .eq(Device::getDeleted, false)
+                    .list()
+                    .stream()
+                    .map(Device::getId)
+                    .collect(Collectors.toList());
+        } else if (request.getDeviceIds() != null && !request.getDeviceIds().isEmpty()) {
+            ids = request.getDeviceIds().stream()
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+        } else {
+            return Result.error(400, "deviceIds 或 deviceCodes 至少需要提供一个");
+        }
+
+        if (ids.isEmpty()) {
+            return Result.error(404, "未找到匹配的设备");
         }
 
         // 解析区域名
@@ -369,10 +650,6 @@ public class DeviceController {
             }
             areaName = area.getName();
         }
-
-        // 去重
-        List<Long> ids = request.getDeviceIds().stream()
-                .distinct().collect(Collectors.toList());
 
         deviceService.batchUpdateArea(ids, request.getAreaId(), areaName);
 
