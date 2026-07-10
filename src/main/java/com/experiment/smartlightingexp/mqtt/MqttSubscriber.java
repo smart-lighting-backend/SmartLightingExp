@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -137,18 +138,21 @@ public class MqttSubscriber {
                                     && device.getManualExpireAt() != null
                                     && device.getManualExpireAt().isAfter(now);
 
+                            // 合并遥测数据到 latestData，保留控制元数据（action/brightness/controlSource）
+                            String mergedLatestData = mergeLatestData(device, telemetryJson);
+
                             if (inManual) {
                                 deviceMapper.update(null,
                                         Wrappers.<Device>lambdaUpdate()
                                                 .eq(Device::getDeviceId, telemetryDeviceId)
-                                                .set(Device::getLatestData, telemetryJson)
+                                                .set(Device::getLatestData, mergedLatestData)
                                                 .set(Device::getLastHeartbeatAt, now)
                                                 .set(Device::getStatus, 1));
                             } else {
                                 com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device> updateWrapper =
                                         Wrappers.<Device>lambdaUpdate()
                                                 .eq(Device::getDeviceId, telemetryDeviceId)
-                                                .set(Device::getLatestData, telemetryJson)
+                                                .set(Device::getLatestData, mergedLatestData)
                                                 .set(Device::getLastHeartbeatAt, now)
                                                 .set(Device::getStatus, 1);
                                 if (device != null && Boolean.TRUE.equals(device.getManualMode())) {
@@ -188,6 +192,42 @@ public class MqttSubscriber {
             log.info("MQTT subscriber ready, topics=heartbeat,telemetry,vision/event,voice/event,command/ack");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
+        }
+    }
+
+    /** 控制元数据字段 — 合并遥测时保留，避免被传感器数据覆盖。 */
+    private static final Set<String> CONTROL_META_KEYS = Set.of("action", "brightness", "controlSource", "controlIssuedAt");
+
+    /**
+     * 将新遥测 JSON 合并到设备现有 latestData 中，保留控制元数据。
+     */
+    @SuppressWarnings("unchecked")
+    private String mergeLatestData(Device device, String telemetryJson) {
+        Map<String, Object> merged = new java.util.LinkedHashMap<>();
+        // 先放入遥测数据
+        try {
+            Map<String, Object> telemetryMap = objectMapper.readValue(telemetryJson, Map.class);
+            merged.putAll(telemetryMap);
+        } catch (Exception e) {
+            log.warn("解析遥测JSON失败，使用原始字符串: {}", e.getMessage());
+        }
+        // 保留已有的控制元数据
+        if (device != null && device.getLatestData() != null && !device.getLatestData().isBlank()) {
+            try {
+                Map<String, Object> existing = objectMapper.readValue(device.getLatestData(), Map.class);
+                for (String key : CONTROL_META_KEYS) {
+                    if (existing.containsKey(key)) {
+                        merged.put(key, existing.get(key));
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("解析已有latestData失败: {}", e.getMessage());
+            }
+        }
+        try {
+            return objectMapper.writeValueAsString(merged);
+        } catch (Exception e) {
+            return telemetryJson;
         }
     }
 

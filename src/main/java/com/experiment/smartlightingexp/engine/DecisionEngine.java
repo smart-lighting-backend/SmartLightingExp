@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.engine;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.experiment.smartlightingexp.config.MqttProperties;
 import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.ControlCommand;
@@ -46,11 +47,25 @@ public class DecisionEngine {
     /** 手动控制后的 AI 锁定时间（分钟），由 MqttSubscriber 统一管理过期清除 */
     private static final long MANUAL_LOCK_MINUTES = 30;
 
+    /** 同一设备两次评估的最短间隔（毫秒），防止线程池并发导致重复决策 */
+    private static final long EVAL_DEDUP_MS = 5000;
+
+    /** 设备最后评估时间戳 */
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> lastEvalTime = new java.util.concurrent.ConcurrentHashMap<>();
+
     /**
      * 对指定设备执行一次策略评估。
      * 由 MqttSubscriber 在收到新遥测后调用。
      */
     public void evaluate(String deviceId, Telemetry telemetry) {
+        // 去重：同一设备 5 秒内不重复评估
+        long evalNow = System.currentTimeMillis();
+        Long last = lastEvalTime.put(deviceId, evalNow);
+        if (last != null && (evalNow - last) < EVAL_DEDUP_MS) {
+            log.debug("[{}] DecisionEngine skipped: dedup ({}ms)", deviceId, evalNow - last);
+            return;
+        }
+
         log.debug("[{}] DecisionEngine: lux={}, pir={}", deviceId,
                 telemetry.getIlluminance(), telemetry.getPir());
 
@@ -143,6 +158,9 @@ public class DecisionEngine {
                 cmd.setIssuedAt(LocalDateTime.now());
                 cmd.setResultDetail("策略引擎-" + policyName);
                 controlCommandMapper.insert(cmd);
+
+                // 2b. 更新设备 latestData — 写入自动控制元数据，确保前后端状态一致
+                updateDeviceLatestData(deviceId, action, extractBrightness(action));
             }
 
             // 3. 记录 decision_log
@@ -254,6 +272,40 @@ public class DecisionEngine {
             return Integer.parseInt(num);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * 将自动控制结果合并写入设备 latestData，保留遥测快照的同时注入控制元数据。
+     */
+    @SuppressWarnings("unchecked")
+    private void updateDeviceLatestData(String deviceId, String action, Integer brightness) {
+        try {
+            Device device = deviceMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Device>()
+                            .eq(Device::getDeviceId, deviceId));
+            if (device == null) return;
+
+            Map<String, Object> merged = new java.util.LinkedHashMap<>();
+            if (device.getLatestData() != null && !device.getLatestData().isBlank()) {
+                try {
+                    Map<String, Object> existing = objectMapper.readValue(device.getLatestData(), Map.class);
+                    merged.putAll(existing);
+                } catch (Exception ignored) {}
+            }
+            merged.put("action", action);
+            if (brightness != null) merged.put("brightness", brightness);
+            else if ("ON".equals(action)) merged.put("brightness", 100);
+            else if ("OFF".equals(action)) merged.put("brightness", 0);
+            merged.put("controlSource", "AUTO");
+            merged.put("controlIssuedAt", LocalDateTime.now().toString());
+
+            deviceMapper.update(null,
+                    Wrappers.<Device>lambdaUpdate()
+                            .eq(Device::getDeviceId, deviceId)
+                            .set(Device::getLatestData, objectMapper.writeValueAsString(merged)));
+        } catch (Exception e) {
+            log.error("更新设备latestData失败 [{}]: {}", deviceId, e.getMessage());
         }
     }
 
