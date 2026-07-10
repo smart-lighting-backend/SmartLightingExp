@@ -1,11 +1,13 @@
 package com.experiment.smartlightingexp.engine;
 
 import com.experiment.smartlightingexp.config.MqttProperties;
+import com.experiment.smartlightingexp.entity.AlarmRecord;
 import com.experiment.smartlightingexp.entity.ControlCommand;
 import com.experiment.smartlightingexp.entity.DecisionLog;
 import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.LightingPolicy;
 import com.experiment.smartlightingexp.entity.Telemetry;
+import com.experiment.smartlightingexp.mapper.AlarmRecordMapper;
 import com.experiment.smartlightingexp.mapper.ControlCommandMapper;
 import com.experiment.smartlightingexp.mapper.DecisionLogMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
@@ -35,6 +37,7 @@ public class DecisionEngine {
     private final LightingPolicyMapper lightingPolicyMapper;
     private final ControlCommandMapper controlCommandMapper;
     private final DecisionLogMapper decisionLogMapper;
+    private final AlarmRecordMapper alarmRecordMapper;
     private final DeviceMapper deviceMapper;
     private final MqttPublisher mqttPublisher;
     private final MqttProperties mqttProperties;
@@ -109,29 +112,38 @@ public class DecisionEngine {
         return ConditionEvaluator.matchesCondition(conditionsJson, telemetry);
     }
 
+    /** 委托给 ConditionEvaluator（支持模拟时间，用于策略模拟测试）。 */
+    public boolean matchesCondition(String conditionsJson, Telemetry telemetry, java.time.LocalTime simulatedTime) {
+        return ConditionEvaluator.matchesCondition(conditionsJson, telemetry, simulatedTime);
+    }
+
     // ======================== 执行动作 ========================
 
     private void executeAction(String deviceId, String action, String policyName, Telemetry telemetry) {
         try {
-            // 1. 发布 MQTT 控制指令
-            Map<String, Object> cmdPayload = new HashMap<>();
-            cmdPayload.put("action", action);
-            cmdPayload.put("issuedAt", LocalDateTime.now().toString());
-            cmdPayload.put("source", "AUTO");
-            cmdPayload.put("reason", "策略引擎: " + policyName);
-            String payload = objectMapper.writeValueAsString(cmdPayload);
-            mqttPublisher.publish(mqttProperties.getTopicPrefix() + "/" + deviceId + "/command", payload, 0);
+            boolean skipControl = "NOTIFY".equals(action);
 
-            // 2. 记录 control_command
-            ControlCommand cmd = new ControlCommand();
-            cmd.setDeviceId(deviceId);
-            cmd.setAction(action);
-            cmd.setBrightness(extractBrightness(action));
-            cmd.setSource("AUTO");
-            cmd.setStatus("SENT");
-            cmd.setIssuedAt(LocalDateTime.now());
-            cmd.setResultDetail("策略引擎-" + policyName);
-            controlCommandMapper.insert(cmd);
+            // 1. 发布 MQTT 控制指令（NOTIFY 类型跳过）
+            if (!skipControl) {
+                Map<String, Object> cmdPayload = new HashMap<>();
+                cmdPayload.put("action", action);
+                cmdPayload.put("issuedAt", LocalDateTime.now().toString());
+                cmdPayload.put("source", "AUTO");
+                cmdPayload.put("reason", "策略引擎: " + policyName);
+                String payload = objectMapper.writeValueAsString(cmdPayload);
+                mqttPublisher.publish(mqttProperties.getTopicPrefix() + "/" + deviceId + "/command", payload, 0);
+
+                // 2. 记录 control_command
+                ControlCommand cmd = new ControlCommand();
+                cmd.setDeviceId(deviceId);
+                cmd.setAction(action);
+                cmd.setBrightness(extractBrightness(action));
+                cmd.setSource("AUTO");
+                cmd.setStatus("SENT");
+                cmd.setIssuedAt(LocalDateTime.now());
+                cmd.setResultDetail("策略引擎-" + policyName);
+                controlCommandMapper.insert(cmd);
+            }
 
             // 3. 记录 decision_log
             DecisionLog decisionLog = new DecisionLog();
@@ -142,7 +154,7 @@ public class DecisionEngine {
             decisionLog.setResult("MATCH_EXECUTED");
             decisionLogMapper.insert(decisionLog);
 
-            // 4. 策略命中时联动语音告警
+            // 4. 策略命中 → 附加联动动作
             LightingPolicy matched = lightingPolicyMapper.selectOne(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<LightingPolicy>()
                             .eq(LightingPolicy::getName, policyName)
@@ -153,16 +165,55 @@ public class DecisionEngine {
                 Object extra = conds.get("extraActions");
                 if (extra instanceof Map) {
                     @SuppressWarnings("unchecked")
-                    Map<String, Object> extraActions = (Map<String, Object>) extra;
-                    if (Boolean.TRUE.equals(extraActions.get("voiceAlert"))) {
+                    Map<String, Object> ea = (Map<String, Object>) extra;
+                    LocalDateTime now = LocalDateTime.now();
+
+                    // 4a. 语音播报（支持自定义内容）
+                    if (Boolean.TRUE.equals(ea.get("voiceAlert"))) {
+                        String voiceContent = ea.get("voiceContent") instanceof String
+                                && !((String) ea.get("voiceContent")).isBlank()
+                                ? (String) ea.get("voiceContent")
+                                : "策略触发: " + policyName + " → " + action;
                         Map<String, Object> voicePayload = new HashMap<>();
                         voicePayload.put("deviceId", deviceId);
-                        voicePayload.put("type", "警告");
-                        voicePayload.put("content", "策略触发: " + policyName + " → " + action);
-                        voicePayload.put("source", "自动");
-                        voicePayload.put("occurredAt", LocalDateTime.now().toString());
-                        String voiceJson = objectMapper.writeValueAsString(voicePayload);
-                        mqttPublisher.publish(mqttProperties.getTopicPrefix() + "/" + deviceId + "/voice/event", voiceJson, 0);
+                        voicePayload.put("type", "播报");
+                        voicePayload.put("content", voiceContent);
+                        voicePayload.put("source", "策略联动");
+                        voicePayload.put("occurredAt", now.toString());
+                        mqttPublisher.publish(mqttProperties.getTopicPrefix() + "/" + deviceId + "/voice/event",
+                                objectMapper.writeValueAsString(voicePayload), 0);
+                    }
+
+                    // 4b. 自动拍照（发布视觉事件）
+                    if (Boolean.TRUE.equals(ea.get("capturePhoto"))) {
+                        Map<String, Object> visionPayload = new HashMap<>();
+                        visionPayload.put("deviceId", deviceId);
+                        visionPayload.put("eventType", "策略联动拍照");
+                        visionPayload.put("confidence", 1.0);
+                        visionPayload.put("snapshotRef", "policy/snapshot/" + deviceId + "_" + System.currentTimeMillis() + ".jpg");
+                        visionPayload.put("occurredAt", now.toString());
+                        mqttPublisher.publish(mqttProperties.getTopicPrefix() + "/" + deviceId + "/vision/event",
+                                objectMapper.writeValueAsString(visionPayload), 0);
+                    }
+
+                    // 4c. 产生自定义告警
+                    if (Boolean.TRUE.equals(ea.get("generateAlert"))) {
+                        String alertType = ea.get("alertType") instanceof String
+                                ? (String) ea.get("alertType") : "POLICY_ALERT";
+                        String alertLevel = ea.get("alertLevel") instanceof String
+                                ? (String) ea.get("alertLevel") : "WARNING";
+                        String alertContent = ea.get("alertContent") instanceof String
+                                && !((String) ea.get("alertContent")).isBlank()
+                                ? (String) ea.get("alertContent")
+                                : "策略 " + policyName + " 触发 → " + action;
+                        AlarmRecord alarm = new AlarmRecord();
+                        alarm.setDeviceId(deviceId);
+                        alarm.setType(alertType);
+                        alarm.setLevel(alertLevel);
+                        alarm.setStatus("ACTIVE");
+                        alarm.setReason(alertContent);
+                        alarm.setStartAt(now);
+                        alarmRecordMapper.insert(alarm);
                     }
                 }
             }

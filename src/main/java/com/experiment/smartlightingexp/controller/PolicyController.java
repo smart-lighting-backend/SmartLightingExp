@@ -303,12 +303,20 @@ public class PolicyController {
         simulated.setPir(request.getPir());
         simulated.setTrafficFlow(request.getTrafficFlow());
 
+        // 解析模拟时间
+        java.time.LocalTime simulatedTime = null;
+        if (request.getCurrentTime() != null && !request.getCurrentTime().isBlank()) {
+            try {
+                simulatedTime = java.time.LocalTime.parse(request.getCurrentTime());
+            } catch (Exception ignored) { /* 格式错误则使用真实时间 */ }
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
 
         // 1. 测试用户正在编辑的策略（如果传了 conditions）
         boolean currentMatched = false;
         if (request.getConditions() != null && !request.getConditions().isBlank()) {
-            currentMatched = decisionEngine.matchesCondition(request.getConditions(), simulated);
+            currentMatched = decisionEngine.matchesCondition(request.getConditions(), simulated, simulatedTime);
             result.put("matched", currentMatched);
             if (currentMatched) {
                 result.put("matchedPolicy", request.getName() != null ? request.getName() : "(当前编辑策略)");
@@ -325,7 +333,7 @@ public class PolicyController {
 
         List<Map<String, Object>> allResults = new ArrayList<>();
         for (LightingPolicy p : allPolicies) {
-            boolean hit = decisionEngine.matchesCondition(p.getConditions(), simulated);
+            boolean hit = decisionEngine.matchesCondition(p.getConditions(), simulated, simulatedTime);
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("policyId", p.getId());
             row.put("policyName", p.getName());
@@ -333,17 +341,17 @@ public class PolicyController {
             row.put("hit", hit);
             row.put("priority", p.getPriority());
             allResults.add(row);
-            // 如果没传 conditions 或者当前策略未命中，取第一个命中的已启用策略
-            if (hit && !currentMatched && (request.getConditions() == null || request.getConditions().isBlank())) {
+            // 如果当前策略未命中，取第一个命中的已启用策略
+            if (hit && !currentMatched) {
                 result.put("matched", true);
                 result.put("matchedPolicy", p.getName());
                 result.put("matchedAction", p.getAction());
-                currentMatched = true; // 只取优先级最高的
+                currentMatched = true;
             }
         }
         result.put("allResults", allResults);
 
-        if (!currentMatched && (request.getConditions() == null || request.getConditions().isBlank())) {
+        if (!currentMatched) {
             result.put("matched", false);
         }
 
