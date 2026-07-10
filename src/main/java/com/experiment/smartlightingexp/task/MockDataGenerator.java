@@ -49,12 +49,11 @@ public class MockDataGenerator {
     }
 
     /**
-     * 模拟数据生成 — 分批发布，每批 5 台设备，批次间隔 3 秒，
-     * 避免瞬间大量 MQTT 消息导致 EMQX 桥接拥塞。
+     * 模拟数据生成 — 分批发布，每批 20 台设备，批次间隔 500ms。
      */
-    private static final int BATCH_SIZE = 5;
-    private static final long BATCH_DELAY_MS = 3000;
-    private static final long DEVICE_DELAY_MS = 200;
+    private static final int BATCH_SIZE = 20;
+    private static final long BATCH_DELAY_MS = 500;
+    private static final long DEVICE_DELAY_MS = 0;
 
     @Scheduled(initialDelay = 30000, fixedRate = 60000)
     public void generateData() {
