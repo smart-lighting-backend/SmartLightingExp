@@ -186,6 +186,9 @@ public class DeviceController {
         if (device.getDeviceId() == null || device.getDeviceId().isBlank()) {
             return Result.error(400, "设备编号不能为空");
         }
+        if (!device.getDeviceId().matches("^[a-zA-Z0-9][a-zA-Z0-9_]*$")) {
+            return Result.error(400, "设备编号只能包含字母、数字和下划线，且不能以下划线开头");
+        }
 
         // 检查 deviceId 唯一性（包含已删除的数据，因为唯一索引仍占用）
         Device exist = deviceService.lambdaQuery()
@@ -239,6 +242,17 @@ public class DeviceController {
                 .toList());
         Set<String> batchIds = new HashSet<>();
 
+        // 获取已有设备坐标集合（用于坐标重合检测）
+        Set<String> existingLocations = new HashSet<>(deviceService.lambdaQuery()
+                .select(Device::getLocation)
+                .isNotNull(Device::getLocation)
+                .ne(Device::getLocation, "")
+                .list()
+                .stream()
+                .map(Device::getLocation)
+                .toList());
+        Set<String> batchLocations = new HashSet<>();
+
         // 预加载 area name → areaId 映射
         Map<String, Long> areaNameToId = new LinkedHashMap<>();
         List<String> areaNames = devices.stream()
@@ -266,6 +280,16 @@ public class DeviceController {
                 continue;
             }
 
+            // 设备编号格式校验
+            if (!d.getDeviceId().matches("^[a-zA-Z0-9][a-zA-Z0-9_]*$")) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", row);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "设备编号只能包含字母、数字和下划线，且不能以下划线开头");
+                failed.add(err);
+                continue;
+            }
+
             // 重复检测：已有设备 + 本批次内重复
             if (existingIds.contains(d.getDeviceId()) || batchIds.contains(d.getDeviceId())) {
                 Map<String, Object> err = new LinkedHashMap<>();
@@ -277,6 +301,20 @@ public class DeviceController {
             }
 
             batchIds.add(d.getDeviceId());
+
+            // 坐标重合检测
+            String loc = d.getLocation();
+            if (loc != null && !loc.isBlank()) {
+                if (existingLocations.contains(loc) || batchLocations.contains(loc)) {
+                    Map<String, Object> err = new LinkedHashMap<>();
+                    err.put("row", row);
+                    err.put("deviceId", d.getDeviceId());
+                    err.put("reason", "坐标 (" + loc + ") 与已有设备重合");
+                    failed.add(err);
+                    continue;
+                }
+                batchLocations.add(loc);
+            }
 
             // 设置默认值
             if (d.getStatus() == null) d.setStatus(1);
@@ -386,6 +424,17 @@ public class DeviceController {
                 .map(Device::getDeviceId).toList());
         Set<String> batchIds = new HashSet<>();
 
+        // 获取已有设备坐标集合（用于坐标重合检测）
+        Set<String> existingLocations = new HashSet<>(deviceService.lambdaQuery()
+                .select(Device::getLocation)
+                .isNotNull(Device::getLocation)
+                .ne(Device::getLocation, "")
+                .list()
+                .stream()
+                .map(Device::getLocation)
+                .toList());
+        Set<String> batchLocations = new HashSet<>();
+
         Map<String, Long> areaNameToId = new LinkedHashMap<>();
         List<String> areaNames = devices.stream()
                 .map(Device::getArea).filter(a -> a != null && !a.isBlank()).distinct().toList();
@@ -408,6 +457,16 @@ public class DeviceController {
                 continue;
             }
 
+            // 设备编号格式校验
+            if (!d.getDeviceId().matches("^[a-zA-Z0-9][a-zA-Z0-9_]*$")) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", rowNum);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "设备编号只能包含字母、数字和下划线，且不能以下划线开头");
+                failed.add(err);
+                continue;
+            }
+
             if (existingIds.contains(d.getDeviceId()) || batchIds.contains(d.getDeviceId())) {
                 Map<String, Object> err = new LinkedHashMap<>();
                 err.put("row", rowNum);
@@ -418,6 +477,21 @@ public class DeviceController {
             }
 
             batchIds.add(d.getDeviceId());
+
+            // 坐标重合检测
+            String loc = d.getLocation();
+            if (loc != null && !loc.isBlank()) {
+                if (existingLocations.contains(loc) || batchLocations.contains(loc)) {
+                    Map<String, Object> err = new LinkedHashMap<>();
+                    err.put("row", rowNum);
+                    err.put("deviceId", d.getDeviceId());
+                    err.put("reason", "坐标 (" + loc + ") 与已有设备重合");
+                    failed.add(err);
+                    continue;
+                }
+                batchLocations.add(loc);
+            }
+
             if (d.getStatus() == null) d.setStatus(1);
             if (d.getEnabled() == null) d.setEnabled(true);
             if (d.getHealthScore() == null) d.setHealthScore(new BigDecimal("100.00"));
