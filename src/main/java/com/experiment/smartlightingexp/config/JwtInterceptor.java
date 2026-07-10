@@ -35,10 +35,11 @@ public class JwtInterceptor implements HandlerInterceptor {
     private static final String SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 
     /**
-     * 白名单路径前缀 — 匹配开头即放行。
+     * 白名单路径前缀 — 匹配开头即放行（所有 HTTP 方法）。
      */
     private static final List<String> WHITE_LIST = List.of(
             "/api/auth/login",
+            "/api/auth/register",
             "/doc.html",
             "/v3/api-docs",
             "/swagger-resources",
@@ -47,12 +48,24 @@ public class JwtInterceptor implements HandlerInterceptor {
             "/favicon.ico"
     );
 
+    /**
+     * 仅 GET 方法放行的路径前缀 — 未登录用户可以读取，但不能写入。
+     */
+    private static final List<String> PUBLIC_GET_PATHS = List.of(
+            "/api/roles"
+    );
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String path = request.getRequestURI();
 
-        // 1. 白名单放行
+        // 1. 白名单放行（所有方法）
         if (isWhiteListed(path)) {
+            return true;
+        }
+
+        // 1b. 公开 GET 路径放行（仅 GET 请求）
+        if ("GET".equalsIgnoreCase(request.getMethod()) && isPublicGetPath(path)) {
             return true;
         }
 
@@ -140,6 +153,13 @@ public class JwtInterceptor implements HandlerInterceptor {
      */
     private boolean isWhiteListed(String path) {
         return WHITE_LIST.stream().anyMatch(path::startsWith);
+    }
+
+    /**
+     * 判断路径是否在公开 GET 路径列表中。
+     */
+    private boolean isPublicGetPath(String path) {
+        return PUBLIC_GET_PATHS.stream().anyMatch(path::startsWith);
     }
 
     private List<String> getEffectivePermissions(String roleCode) {

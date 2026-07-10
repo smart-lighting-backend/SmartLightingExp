@@ -4,6 +4,7 @@ import com.experiment.smartlightingexp.common.Result;
 import com.experiment.smartlightingexp.dto.LoginRequest;
 import com.experiment.smartlightingexp.dto.LoginResponse;
 import com.experiment.smartlightingexp.dto.MenuTreeNode;
+import com.experiment.smartlightingexp.dto.RegisterRequest;
 import com.experiment.smartlightingexp.entity.Role;
 import com.experiment.smartlightingexp.entity.User;
 import com.experiment.smartlightingexp.mapper.RoleMapper;
@@ -125,6 +126,77 @@ public class AuthController {
         List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
 
         return Result.success(new LoginResponse(token, username, roleCode, permissions, menus));
+    }
+
+    /**
+     * 用户注册 — 创建账号并自动登录。
+     * 注册成功后直接签发 JWT 返回，无需再次登录。
+     */
+    @PostMapping("/register")
+    public Result<LoginResponse> register(@RequestBody RegisterRequest request,
+                                          HttpServletRequest httpRequest) {
+        // 1. 校验必填
+        if (request.getUsername() == null || request.getUsername().isBlank()) {
+            return Result.error("用户名不能为空");
+        }
+        if (request.getPassword() == null || request.getPassword().isBlank()) {
+            return Result.error("密码不能为空");
+        }
+        if (request.getRoleId() == null) {
+            return Result.error("请选择角色");
+        }
+
+        // 2. 用户名格式校验
+        if (!request.getUsername().matches("^[a-zA-Z0-9_]+$")) {
+            return Result.error("用户名只能包含字母、数字和下划线");
+        }
+
+        // 3. 密码长度
+        if (request.getPassword().length() < 8) {
+            return Result.error("密码至少 8 位");
+        }
+
+        // 4. 查重
+        User exist = userService.getByUsername(request.getUsername());
+        if (exist != null) {
+            return Result.error("用户名已存在");
+        }
+
+        // 5. 校验角色
+        Role role = roleMapper.selectById(request.getRoleId());
+        if (role == null) {
+            return Result.error("角色不存在");
+        }
+        if (SUPER_ADMIN_ROLE.equals(role.getRoleCode())) {
+            return Result.error("不允许注册为超级管理员");
+        }
+
+        // 6. 创建用户
+        User user = new User();
+        user.setUsername(request.getUsername());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setRealName(request.getRealName());
+        user.setPhone(request.getPhone());
+        user.setRoleId(request.getRoleId());
+        user.setEnabled(true);
+        user.setDeleted(false);
+        userService.save(user);
+
+        // 7. 查询权限和菜单（类似登录）
+        List<String> permissions = getEffectivePermissions(role.getRoleCode(), user.getRoleId());
+        List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
+
+        // 8. 签发 JWT
+        String token = jwtUtil.generateToken(user.getUsername(), role.getRoleCode(), permissions);
+
+        log.info("[注册成功] username={}, role={}", user.getUsername(), role.getRoleCode());
+
+        // 9. 审计日志
+        String clientIp = getClientIp(httpRequest);
+        auditLog(user.getUsername(), "REGISTER", "USER", String.valueOf(user.getId()),
+                "注册成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
+
+        return Result.success(new LoginResponse(token, user.getUsername(), role.getRoleCode(), permissions, menus));
     }
 
     /**
