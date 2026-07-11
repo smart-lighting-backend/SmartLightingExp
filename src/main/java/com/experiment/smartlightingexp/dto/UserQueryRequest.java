@@ -24,9 +24,6 @@ public class UserQueryRequest {
     /** 邮箱（模糊匹配） */
     private String email;
 
-    /** 所属部门（精确匹配） */
-    private String department;
-
     /** 管辖区域编码（精确匹配） */
     private String areaCode;
 

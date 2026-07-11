@@ -30,8 +30,6 @@ public class User {
 
     private String email;
 
-    private String department;
-
     /** 管辖区域编码（如 CQ-01），用于数据权限隔离 */
     private String areaCode;
 
