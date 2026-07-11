@@ -19,6 +19,9 @@ public class LoginResponse {
     private String phone;
     private String roleCode;
 
+    /** 角色中文名（如"路灯管理员"），供前端直接展示 */
+    private String roleName;
+
     /** 当前用户的权限编码列表（前端按钮级控制） */
     private List<String> permissions;
 

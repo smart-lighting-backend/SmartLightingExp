@@ -447,6 +447,9 @@ public class UserController {
         if (request.getEnabled() != null) {
             wrapper.eq(User::getEnabled, request.getEnabled());
         }
+        if (request.getIds() != null && !request.getIds().isEmpty()) {
+            wrapper.in(User::getId, request.getIds());
+        }
         return wrapper;
     }
 

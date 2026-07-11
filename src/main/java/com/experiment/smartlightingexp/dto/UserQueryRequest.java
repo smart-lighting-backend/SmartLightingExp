@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.dto;
 
+import java.util.List;
 import lombok.Data;
 
 /**
@@ -31,6 +32,9 @@ public class UserQueryRequest {
 
     /** 是否启用 */
     private Boolean enabled;
+
+    /** 用户ID 列表（用于按选中的 ID 导出） */
+    private List<Long> ids;
 
     // ======================== 分页参数 ========================
 
