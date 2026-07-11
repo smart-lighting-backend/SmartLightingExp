@@ -31,9 +31,10 @@ public class VoiceEventController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String deviceId,
-            @RequestParam(required = false) String type) {
-        List<VoiceEvent> records = voiceEventDao.queryPage(deviceId, type, page, size);
-        long total = voiceEventDao.countPage(deviceId, type);
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String source) {
+        List<VoiceEvent> records = voiceEventDao.queryPage(deviceId, type, source, page, size);
+        long total = voiceEventDao.countPage(deviceId, type, source);
         records.forEach(EventTextNormalizer::normalizeVoiceEvent);
         Page<VoiceEvent> p = new Page<>(page, size);
         p.setRecords(records);
@@ -47,8 +48,8 @@ public class VoiceEventController {
             @PathVariable String deviceId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int size) {
-        List<VoiceEvent> records = voiceEventDao.queryPage(deviceId, null, page, size);
-        long total = voiceEventDao.countPage(deviceId, null);
+        List<VoiceEvent> records = voiceEventDao.queryPage(deviceId, null, null, page, size);
+        long total = voiceEventDao.countPage(deviceId, null, null);
         records.forEach(EventTextNormalizer::normalizeVoiceEvent);
         Page<VoiceEvent> p = new Page<>(page, size);
         p.setRecords(records);

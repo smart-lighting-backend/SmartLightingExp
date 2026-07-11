@@ -35,7 +35,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class HealthScoreTask {
 
-    private static final int HEALTH_THRESHOLD = 60;
+    private static final int HEALTH_THRESHOLD = 50;
     private static final String ALARM_TYPE_HEALTH = "HEALTH_LOW";
     private static final String ALARM_LEVEL_WARNING = "WARNING";
 

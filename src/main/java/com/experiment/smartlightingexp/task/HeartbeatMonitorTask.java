@@ -74,12 +74,12 @@ public class HeartbeatMonitorTask {
                             .set(Device::getStatus, 2));
             offlineCount++;
 
-            // 检查是否已有 ACTIVE 离线告警（去重）
+            // 检查是否已有未恢复的离线告警（去重，含 ACTIVE 和 ACKNOWLEDGED）
             Long existingAlarmCount = alarmRecordMapper.selectCount(
                     Wrappers.<AlarmRecord>lambdaQuery()
                             .eq(AlarmRecord::getDeviceId, device.getDeviceId())
                             .eq(AlarmRecord::getType, "OFFLINE")
-                            .eq(AlarmRecord::getStatus, "ACTIVE"));
+                            .in(AlarmRecord::getStatus, List.of("ACTIVE", "ACKNOWLEDGED")));
 
             if (existingAlarmCount == 0) {
                 AlarmRecord alarm = new AlarmRecord();

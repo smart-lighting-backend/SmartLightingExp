@@ -181,7 +181,10 @@ public class MqttSubscriber {
         subscribeTopics();
     }
 
+    private volatile boolean topicsSubscribed = false;
+
     private void subscribeTopics() {
+        if (topicsSubscribed) return;
         try {
             String prefix = mqttProperties.getTopicPrefix();
             mqttClient.subscribe(prefix + "/+/heartbeat", 1);
@@ -189,6 +192,7 @@ public class MqttSubscriber {
             mqttClient.subscribe(prefix + "/+/vision/event", 1);
             mqttClient.subscribe(prefix + "/+/voice/event", 1);
             mqttClient.subscribe(prefix + "/+/command/ack", 1);
+            topicsSubscribed = true;
             log.info("MQTT subscriber ready, topics=heartbeat,telemetry,vision/event,voice/event,command/ack");
         } catch (MqttException e) {
             log.error("MQTT subscribe failed: {}", e.getMessage());
@@ -252,21 +256,25 @@ public class MqttSubscriber {
                     abnormalFields.stream().map(SensorValidator.AbnormalField::description)
                             .collect(Collectors.joining("; ")));
 
-            if (counter.abnormalCount >= FAULT_ABNORMAL_THRESHOLD
-                    && alarmRecordService.findActiveFaultAlarm(deviceId) == null) {
-                String reason = abnormalFields.stream()
-                        .map(SensorValidator.AbnormalField::description)
-                        .collect(Collectors.joining("; "));
-                AlarmRecord alarm = new AlarmRecord();
-                alarm.setDeviceId(deviceId);
-                alarm.setType("FAULT");
-                alarm.setLevel("CRITICAL");
-                alarm.setStatus("ACTIVE");
-                alarm.setReason("传感器数据异常: " + reason);
-                alarm.setStartAt(now);
-                alarmRecordMapper.insert(alarm);
-                systemEventPublisher.publishAlarmEvent("created", alarm);
-                log.warn("[{}] FAULT alarm created: {}", deviceId, reason);
+            if (counter.abnormalCount >= FAULT_ABNORMAL_THRESHOLD) {
+                synchronized (counter) {
+                    if (counter.abnormalCount >= FAULT_ABNORMAL_THRESHOLD
+                            && alarmRecordService.findActiveFaultAlarm(deviceId) == null) {
+                        String reason = abnormalFields.stream()
+                                .map(SensorValidator.AbnormalField::description)
+                                .collect(Collectors.joining("; "));
+                        AlarmRecord alarm = new AlarmRecord();
+                        alarm.setDeviceId(deviceId);
+                        alarm.setType("FAULT");
+                        alarm.setLevel("CRITICAL");
+                        alarm.setStatus("ACTIVE");
+                        alarm.setReason("传感器数据异常: " + reason);
+                        alarm.setStartAt(now);
+                        alarmRecordMapper.insert(alarm);
+                        systemEventPublisher.publishAlarmEvent("created", alarm);
+                        log.warn("[{}] FAULT alarm created: {}", deviceId, reason);
+                    }
+                }
             }
         } else {
             counter.abnormalCount = 0;

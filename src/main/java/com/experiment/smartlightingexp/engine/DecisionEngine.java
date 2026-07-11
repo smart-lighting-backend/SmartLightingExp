@@ -14,6 +14,7 @@ import com.experiment.smartlightingexp.mapper.DecisionLogMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
 import com.experiment.smartlightingexp.mapper.LightingPolicyMapper;
 import com.experiment.smartlightingexp.mqtt.MqttPublisher;
+import com.experiment.smartlightingexp.mqtt.SystemEventPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,7 @@ public class DecisionEngine {
     private final MqttPublisher mqttPublisher;
     private final MqttProperties mqttProperties;
     private final ObjectMapper objectMapper;
+    private final SystemEventPublisher systemEventPublisher;
 
     /** 手动控制后的 AI 锁定时间（分钟），由 MqttSubscriber 统一管理过期清除 */
     private static final long MANUAL_LOCK_MINUTES = 30;
@@ -214,7 +216,7 @@ public class DecisionEngine {
                                 objectMapper.writeValueAsString(visionPayload), 0);
                     }
 
-                    // 4c. 产生自定义告警
+                    // 4c. 产生自定义告警（去重 + MQTT 事件）
                     if (Boolean.TRUE.equals(ea.get("generateAlert"))) {
                         String alertType = ea.get("alertType") instanceof String
                                 ? (String) ea.get("alertType") : "POLICY_ALERT";
@@ -224,14 +226,23 @@ public class DecisionEngine {
                                 && !((String) ea.get("alertContent")).isBlank()
                                 ? (String) ea.get("alertContent")
                                 : "策略 " + policyName + " 触发 → " + action;
-                        AlarmRecord alarm = new AlarmRecord();
-                        alarm.setDeviceId(deviceId);
-                        alarm.setType(alertType);
-                        alarm.setLevel(alertLevel);
-                        alarm.setStatus("ACTIVE");
-                        alarm.setReason(alertContent);
-                        alarm.setStartAt(now);
-                        alarmRecordMapper.insert(alarm);
+                        // 去重：同一设备同一类型已有未恢复告警则跳过
+                        Long existing = alarmRecordMapper.selectCount(
+                                Wrappers.<AlarmRecord>lambdaQuery()
+                                        .eq(AlarmRecord::getDeviceId, deviceId)
+                                        .eq(AlarmRecord::getType, alertType)
+                                        .in(AlarmRecord::getStatus, List.of("ACTIVE", "ACKNOWLEDGED")));
+                        if (existing == 0) {
+                            AlarmRecord alarm = new AlarmRecord();
+                            alarm.setDeviceId(deviceId);
+                            alarm.setType(alertType);
+                            alarm.setLevel(alertLevel);
+                            alarm.setStatus("ACTIVE");
+                            alarm.setReason(alertContent);
+                            alarm.setStartAt(now);
+                            alarmRecordMapper.insert(alarm);
+                            systemEventPublisher.publishAlarmEvent("created", alarm);
+                        }
                     }
                 }
             }

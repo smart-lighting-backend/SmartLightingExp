@@ -26,21 +26,21 @@ public class VoiceEventDao {
         return e;
     };
 
-    public List<VoiceEvent> queryPage(String deviceId, String type, int page, int size) {
+    public List<VoiceEvent> queryPage(String deviceId, String type, String source, int page, int size) {
         StringBuilder sql = new StringBuilder(
                 "SELECT ts, device_id, type, content, source FROM voice_event");
         List<Object> params = new ArrayList<>();
-        appendWhere(sql, params, deviceId, type);
+        appendWhere(sql, params, deviceId, type, source);
         sql.append(" ORDER BY ts DESC LIMIT ? OFFSET ?");
         params.add(size);
         params.add((page - 1) * size);
         return tpl.query(sql.toString(), ROW_MAPPER, params.toArray());
     }
 
-    public long countPage(String deviceId, String type) {
+    public long countPage(String deviceId, String type, String source) {
         StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM voice_event");
         List<Object> params = new ArrayList<>();
-        appendWhere(sql, params, deviceId, type);
+        appendWhere(sql, params, deviceId, type, source);
         return tpl.count(sql.toString(), params.toArray());
     }
 
@@ -50,7 +50,7 @@ public class VoiceEventDao {
         return tpl.queryForObject(sql, ROW_MAPPER, deviceId);
     }
 
-    private void appendWhere(StringBuilder sql, List<Object> params, String deviceId, String type) {
+    private void appendWhere(StringBuilder sql, List<Object> params, String deviceId, String type, String source) {
         List<String> conds = new ArrayList<>();
         if (deviceId != null && !deviceId.isBlank()) {
             conds.add("device_id = ?");
@@ -59,6 +59,10 @@ public class VoiceEventDao {
         if (type != null && !type.isBlank()) {
             conds.add("type = ?");
             params.add(type);
+        }
+        if (source != null && !source.isBlank()) {
+            conds.add("source = ?");
+            params.add(source);
         }
         if (!conds.isEmpty()) {
             sql.append(" WHERE ").append(String.join(" AND ", conds));
