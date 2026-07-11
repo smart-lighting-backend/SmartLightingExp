@@ -15,8 +15,8 @@ public class LoginResponse {
     private String token;
     private String username;
     private String realName;
-    private String department;
     private String phone;
+    private String email;
     private String roleCode;
 
     /** 角色中文名（如"路灯管理员"），供前端直接展示 */

@@ -103,8 +103,7 @@ public class AuthController {
         auditLog(user.getUsername(), "LOGIN", "SYSTEM", null,
                 "登录成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
-        return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(),
-                user.getDepartment(), user.getPhone(), role.getRoleCode(), role.getName(), permissions, menus));
+        return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(), user.getPhone(), user.getEmail(), role.getRoleCode(), role.getName(), permissions, menus));
     }
 
     /**
@@ -136,11 +135,12 @@ public class AuthController {
             }
         }
 
-        return Result.success(new LoginResponse(token, username,
-                user == null ? null : user.getRealName(),
-                user == null ? null : user.getDepartment(),
-                user == null ? null : user.getPhone(),
-                roleCode, roleName, permissions, menus));
+        // 查询用户详情（姓名、手机、邮箱）
+        String realName = user != null ? user.getRealName() : null;
+        String phone = user != null ? user.getPhone() : null;
+        String email = user != null ? user.getEmail() : null;
+
+        return Result.success(new LoginResponse(token, username, realName, phone, email, roleCode, roleName, permissions, menus));
     }
 
     /**
@@ -211,8 +211,7 @@ public class AuthController {
         auditLog(user.getUsername(), "REGISTER", "USER", String.valueOf(user.getId()),
                 "注册成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
-        return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(),
-                user.getDepartment(), user.getPhone(), role.getRoleCode(), role.getName(), permissions, menus));
+        return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(), user.getPhone(), user.getEmail(), role.getRoleCode(), role.getName(), permissions, menus));
     }
 
     /**

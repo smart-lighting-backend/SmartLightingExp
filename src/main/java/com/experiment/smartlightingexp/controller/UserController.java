@@ -48,7 +48,7 @@ public class UserController {
 
     /**
      * 组合条件分页查询用户列表。
-     * 支持按 roleId、username、realName、phone、department 等筛选。
+     * 支持按 roleId、username、realName、phone 等筛选。
      */
     @RequirePermission("user:read")
     @PostMapping("/list")
@@ -79,7 +79,6 @@ public class UserController {
             item.put("realName", user.getRealName());
             item.put("phone", user.getPhone());
             item.put("email", user.getEmail());
-            item.put("department", user.getDepartment());
             item.put("areaCode", user.getAreaCode());
             item.put("roleId", user.getRoleId());
             item.put("enabled", user.getEnabled());
@@ -100,8 +99,8 @@ public class UserController {
         Page<Map<String, Object>> pageResult = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
         pageResult.setRecords(records);
 
-        log.info("[用户查询] 条件: roleId={}, username={}, department={}, 结果数={}",
-                request.getRoleId(), request.getUsername(), request.getDepartment(), records.size());
+        log.info("[用户查询] 条件: roleId={}, username={}, 结果数={}",
+                request.getRoleId(), request.getUsername(), records.size());
         return Result.success(pageResult);
     }
 
@@ -125,7 +124,6 @@ public class UserController {
         item.put("realName", user.getRealName());
         item.put("phone", user.getPhone());
         item.put("email", user.getEmail());
-        item.put("department", user.getDepartment());
         item.put("areaCode", user.getAreaCode());
         item.put("roleId", user.getRoleId());
         item.put("enabled", user.getEnabled());
@@ -196,7 +194,6 @@ public class UserController {
         if (user.getRealName() != null) existing.setRealName(user.getRealName());
         if (user.getPhone() != null) existing.setPhone(user.getPhone());
         if (user.getEmail() != null) existing.setEmail(user.getEmail());
-        if (user.getDepartment() != null) existing.setDepartment(user.getDepartment());
         if (user.getAreaCode() != null) existing.setAreaCode(user.getAreaCode());
         if (user.getRoleId() != null) existing.setRoleId(user.getRoleId());
         if (user.getEnabled() != null) existing.setEnabled(user.getEnabled());
@@ -209,6 +206,75 @@ public class UserController {
         saveAuditLog("USER_UPDATE", "USER", String.valueOf(id),
                 "更新用户-" + existing.getUsername(), "SUCCESS", httpRequest);
         log.info("[用户] 更新: id={}, username={}", id, existing.getUsername());
+        return Result.success();
+    }
+
+    /**
+     * 当前用户修改自己的个人信息（真实姓名、手机号、邮箱）。
+     * 无需管理员权限，由 JWT 鉴权即可。
+     */
+    @PutMapping("/profile")
+    public Result<Void> updateProfile(@RequestBody Map<String, String> body,
+                                      HttpServletRequest httpRequest) {
+        String username = SecurityContext.getCurrentUsername();
+        if (username == null) {
+            return Result.error(401, "未登录");
+        }
+
+        User existing = userService.getByUsername(username);
+        if (existing == null) {
+            return Result.error("用户不存在");
+        }
+
+        if (body.containsKey("realName")) existing.setRealName(body.get("realName"));
+        if (body.containsKey("phone")) existing.setPhone(body.get("phone"));
+        if (body.containsKey("email")) existing.setEmail(body.get("email"));
+
+        userService.updateById(existing);
+
+        log.info("[用户] 修改个人信息: username={}, realName={}, phone={}", username, body.get("realName"), body.get("phone"));
+        return Result.success();
+    }
+
+    /**
+     * 当前用户修改自己的登录密码。
+     * 需验证旧密码正确。
+     */
+    @PutMapping("/profile/password")
+    public Result<Void> changePassword(@RequestBody Map<String, String> body,
+                                       HttpServletRequest httpRequest) {
+        String username = SecurityContext.getCurrentUsername();
+        if (username == null) {
+            return Result.error(401, "未登录");
+        }
+
+        String oldPassword = body.get("oldPassword");
+        String newPassword = body.get("newPassword");
+        if (oldPassword == null || oldPassword.isBlank()) {
+            return Result.error("旧密码不能为空");
+        }
+        if (newPassword == null || newPassword.isBlank()) {
+            return Result.error("新密码不能为空");
+        }
+        if (newPassword.length() < 6) {
+            return Result.error("新密码长度不能少于6位");
+        }
+
+        User existing = userService.getByUsername(username);
+        if (existing == null) {
+            return Result.error("用户不存在");
+        }
+
+        // 验证旧密码
+        if (!passwordEncoder.matches(oldPassword, existing.getPassword())) {
+            return Result.error("旧密码不正确");
+        }
+
+        // 更新密码
+        existing.setPassword(passwordEncoder.encode(newPassword));
+        userService.updateById(existing);
+
+        log.info("[用户] 修改密码: username={}", username);
         return Result.success();
     }
 
@@ -350,13 +416,12 @@ public class UserController {
         sheet.setColumnWidth(1, 2500);
         sheet.setColumnWidth(2, 3000);
         sheet.setColumnWidth(3, 6000);
-        sheet.setColumnWidth(4, 4000);
+        sheet.setColumnWidth(4, 3000);
         sheet.setColumnWidth(5, 3000);
-        sheet.setColumnWidth(6, 3000);
-        sheet.setColumnWidth(7, 2000);
-        sheet.setColumnWidth(8, 4000);
+        sheet.setColumnWidth(6, 2000);
+        sheet.setColumnWidth(7, 4000);
+        sheet.setColumnWidth(8, 5000);
         sheet.setColumnWidth(9, 5000);
-        sheet.setColumnWidth(10, 5000);
 
         // 表头样式
         CellStyle headerStyle = workbook.createCellStyle();
@@ -367,7 +432,7 @@ public class UserController {
         headerStyle.setAlignment(HorizontalAlignment.CENTER);
 
         // 表头
-        String[] headers = {"用户名", "姓名", "手机号", "邮箱", "部门", "区域编码", "角色", "状态", "最后登录IP", "最后登录时间", "创建时间"};
+        String[] headers = {"用户名", "姓名", "手机号", "邮箱", "区域编码", "角色", "状态", "最后登录IP", "最后登录时间", "创建时间"};
         Row headerRow = sheet.createRow(0);
         for (int i = 0; i < headers.length; i++) {
             Cell cell = headerRow.createCell(i);
@@ -384,13 +449,12 @@ public class UserController {
             row.createCell(1).setCellValue(user.getRealName() != null ? user.getRealName() : "");
             row.createCell(2).setCellValue(user.getPhone() != null ? user.getPhone() : "");
             row.createCell(3).setCellValue(user.getEmail() != null ? user.getEmail() : "");
-            row.createCell(4).setCellValue(user.getDepartment() != null ? user.getDepartment() : "");
-            row.createCell(5).setCellValue(user.getAreaCode() != null ? user.getAreaCode() : "");
-            row.createCell(6).setCellValue(roleNameMap.getOrDefault(user.getRoleId(), ""));
-            row.createCell(7).setCellValue(Boolean.TRUE.equals(user.getEnabled()) ? "启用" : "停用");
-            row.createCell(8).setCellValue(user.getLastLoginIp() != null ? user.getLastLoginIp() : "");
-            row.createCell(9).setCellValue(user.getLastLoginTime() != null ? user.getLastLoginTime().format(dtf) : "");
-            row.createCell(10).setCellValue(user.getCreateTime() != null ? user.getCreateTime().format(dtf) : "");
+            row.createCell(4).setCellValue(user.getAreaCode() != null ? user.getAreaCode() : "");
+            row.createCell(5).setCellValue(roleNameMap.getOrDefault(user.getRoleId(), ""));
+            row.createCell(6).setCellValue(Boolean.TRUE.equals(user.getEnabled()) ? "启用" : "停用");
+            row.createCell(7).setCellValue(user.getLastLoginIp() != null ? user.getLastLoginIp() : "");
+            row.createCell(8).setCellValue(user.getLastLoginTime() != null ? user.getLastLoginTime().format(dtf) : "");
+            row.createCell(9).setCellValue(user.getCreateTime() != null ? user.getCreateTime().format(dtf) : "");
         }
 
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -437,9 +501,6 @@ public class UserController {
         }
         if (request.getEmail() != null && !request.getEmail().isBlank()) {
             wrapper.like(User::getEmail, request.getEmail());
-        }
-        if (request.getDepartment() != null && !request.getDepartment().isBlank()) {
-            wrapper.eq(User::getDepartment, request.getDepartment());
         }
         if (request.getAreaCode() != null && !request.getAreaCode().isBlank()) {
             wrapper.eq(User::getAreaCode, request.getAreaCode());
