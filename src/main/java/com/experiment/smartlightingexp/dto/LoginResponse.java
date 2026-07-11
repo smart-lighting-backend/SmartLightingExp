@@ -14,6 +14,9 @@ public class LoginResponse {
 
     private String token;
     private String username;
+    private String realName;
+    private String department;
+    private String phone;
     private String roleCode;
 
     /** 当前用户的权限编码列表（前端按钮级控制） */

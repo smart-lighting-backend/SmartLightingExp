@@ -103,7 +103,8 @@ public class AuthController {
         auditLog(user.getUsername(), "LOGIN", "SYSTEM", null,
                 "登录成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
-        return Result.success(new LoginResponse(token, user.getUsername(), role.getRoleCode(), permissions, menus));
+        return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(),
+                user.getDepartment(), user.getPhone(), role.getRoleCode(), permissions, menus));
     }
 
     /**
@@ -121,11 +122,16 @@ public class AuthController {
         }
         String username = jwtUtil.extractSubject(token);
         String roleCode = jwtUtil.extractRoleCode(token);
+        User user = userService.getByUsername(username);
         // 从数据库动态查询权限（Token 中的已是旧数据，分配权限后新 Token 才能更新）
         List<String> permissions = getEffectivePermissions(roleCode);
         List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
 
-        return Result.success(new LoginResponse(token, username, roleCode, permissions, menus));
+        return Result.success(new LoginResponse(token, username,
+                user == null ? null : user.getRealName(),
+                user == null ? null : user.getDepartment(),
+                user == null ? null : user.getPhone(),
+                roleCode, permissions, menus));
     }
 
     /**
@@ -196,7 +202,8 @@ public class AuthController {
         auditLog(user.getUsername(), "REGISTER", "USER", String.valueOf(user.getId()),
                 "注册成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
-        return Result.success(new LoginResponse(token, user.getUsername(), role.getRoleCode(), permissions, menus));
+        return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(),
+                user.getDepartment(), user.getPhone(), role.getRoleCode(), permissions, menus));
     }
 
     /**
