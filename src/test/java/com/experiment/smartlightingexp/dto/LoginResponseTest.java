@@ -12,7 +12,7 @@ class LoginResponseTest {
     void shouldExposeCompleteUserProfile() {
         LoginResponse response = new LoginResponse(
                 "token", "admin", "系统管理员", "技术部", "13800000001",
-                "SUPER_ADMIN", List.of("user:read"), List.of());
+                "SUPER_ADMIN", "超级管理员", List.of("user:read"), List.of());
 
         assertEquals("系统管理员", response.getRealName());
         assertEquals("技术部", response.getDepartment());

@@ -104,7 +104,7 @@ public class AuthController {
                 "登录成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
         return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(),
-                user.getDepartment(), user.getPhone(), role.getRoleCode(), permissions, menus));
+                user.getDepartment(), user.getPhone(), role.getRoleCode(), role.getName(), permissions, menus));
     }
 
     /**
@@ -127,11 +127,20 @@ public class AuthController {
         List<String> permissions = getEffectivePermissions(roleCode);
         List<MenuTreeNode> menus = menuService.getVisibleMenuTree(permissions);
 
+        // 查询角色中文名
+        String roleName = null;
+        if (user != null && user.getRoleId() != null) {
+            Role role = roleMapper.selectById(user.getRoleId());
+            if (role != null) {
+                roleName = role.getName();
+            }
+        }
+
         return Result.success(new LoginResponse(token, username,
                 user == null ? null : user.getRealName(),
                 user == null ? null : user.getDepartment(),
                 user == null ? null : user.getPhone(),
-                roleCode, permissions, menus));
+                roleCode, roleName, permissions, menus));
     }
 
     /**
@@ -203,7 +212,7 @@ public class AuthController {
                 "注册成功-角色:" + role.getRoleCode(), "SUCCESS", clientIp);
 
         return Result.success(new LoginResponse(token, user.getUsername(), user.getRealName(),
-                user.getDepartment(), user.getPhone(), role.getRoleCode(), permissions, menus));
+                user.getDepartment(), user.getPhone(), role.getRoleCode(), role.getName(), permissions, menus));
     }
 
     /**
