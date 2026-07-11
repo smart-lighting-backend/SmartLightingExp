@@ -86,7 +86,8 @@ public class PolicyController {
         List<LightingPolicy> policies = lightingPolicyService.lambdaQuery()
                 .eq(LightingPolicy::getDeleted, false)
                 .list();
-        Set<String> groups = new LinkedHashSet<>();
+        Set<String> groups = new LinkedHashSet<>(List.of(
+                "主干道节能组", "景观灯组", "全域组", "园区灯组", "校区灯组"));
         for (LightingPolicy policy : policies) {
             if (policy.getConditions() == null || policy.getConditions().isBlank()) continue;
             try {
@@ -486,3 +487,4 @@ public class PolicyController {
         return ip;
     }
 }
+

@@ -3,6 +3,7 @@ package com.experiment.smartlightingexp.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 
@@ -30,6 +31,7 @@ public class User {
 
     private String email;
 
+    @TableField(exist = false)
     private String department;
 
     /** 管辖区域编码（如 CQ-01），用于数据权限隔离 */

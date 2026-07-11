@@ -227,7 +227,9 @@ public class AuthController {
     }
 
     private List<String> getEffectivePermissions(String roleCode) {
-        // 所有角色统一从 role_permission 表动态查询
+        if (SUPER_ADMIN_ROLE.equals(roleCode)) {
+            return permissionService.getAllPermissionCodes();
+        }
         return permissionService.getPermissionCodesByRoleCode(roleCode);
     }
 
