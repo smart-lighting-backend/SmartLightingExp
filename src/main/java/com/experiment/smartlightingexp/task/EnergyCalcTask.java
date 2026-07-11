@@ -18,9 +18,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -41,8 +39,7 @@ public class EnergyCalcTask {
 
     /**
      * 每日 23:55 执行能耗统计。
-     * 遍历所有已启用设备，读取当日控制指令，计算时间加权平均亮度，
-     * 估算用电量、节能率和碳减排量，写入 energy_record 表（upsert）。
+     * 批量查询所有设备、控制指令和已有能耗记录，避免 N+1 问题。
      */
     @Scheduled(cron = "0 55 23 * * ?")
     public void calcDailyEnergy() {
@@ -57,62 +54,62 @@ public class EnergyCalcTask {
             return;
         }
 
-        int successCount = 0;
+        List<String> deviceIds = devices.stream().map(Device::getDeviceId).collect(Collectors.toList());
         LocalDateTime dayStart = today.atStartOfDay();
         LocalDateTime dayEnd = today.atTime(LocalTime.MAX);
 
+        // 批量查询：一次查所有设备的当日控制指令
+        List<ControlCommand> allCommands = controlCommandMapper
+                .selectByDeviceIdsAndTimeRange(deviceIds, dayStart, dayEnd);
+        Map<String, List<ControlCommand>> commandsByDevice = allCommands.stream()
+                .collect(Collectors.groupingBy(ControlCommand::getDeviceId));
+
+        // 批量查询：一次查所有设备的当日已有能耗记录
+        List<EnergyRecord> existingRecords = energyRecordMapper
+                .selectByDeviceIdsAndDate(deviceIds, today);
+        Map<String, EnergyRecord> existingMap = existingRecords.stream()
+                .collect(Collectors.toMap(EnergyRecord::getDeviceId, r -> r, (a, b) -> a));
+
+        int successCount = 0;
         for (Device device : devices) {
             try {
-                // 1. 查询当日控制指令
-                List<ControlCommand> commands = controlCommandMapper
-                        .selectByDeviceAndTimeRange(device.getDeviceId(), dayStart, dayEnd);
+                String deviceId = device.getDeviceId();
+                List<ControlCommand> commands = commandsByDevice.getOrDefault(deviceId, Collections.emptyList());
 
-                // 2. 时间加权平均亮度
+                // 时间加权平均亮度
                 double avgBrightness = calcAvgBrightness(commands, dayEnd);
-
-                // 3. 亮灯时长（分钟）
+                // 亮灯时长（分钟）
                 int onDurationMin = calcOnDuration(commands, dayEnd);
-
-                // 4. 额定功率（兜底 150W）
+                // 额定功率（兜底 150W）
                 BigDecimal ratedPower = device.getRatedPower() != null
                         ? device.getRatedPower() : DEFAULT_RATED_POWER;
                 BigDecimal ratedKw = ratedPower.divide(BigDecimal.valueOf(1000), 10, RoundingMode.HALF_UP);
-
-                // 5. 亮灯小时数
+                // 亮灯小时数
                 BigDecimal onDurationH = BigDecimal.valueOf(onDurationMin)
                         .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
-
-                // 6. 估算用电量
+                // 估算用电量
                 BigDecimal brightnessFactor = BigDecimal.valueOf(avgBrightness)
                         .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
                 BigDecimal estimatedKwh = ratedKw
                         .multiply(onDurationH)
                         .multiply(brightnessFactor)
                         .setScale(4, RoundingMode.HALF_UP);
-
-                // 7. 基准用电（满亮度）
+                // 基准用电（满亮度）
                 BigDecimal baselineKwh = ratedKw
                         .multiply(onDurationH)
                         .setScale(4, RoundingMode.HALF_UP);
-
-                // 8. 节能率
+                // 节能率
                 BigDecimal savingRate = BigDecimal.valueOf(100 - avgBrightness)
                         .setScale(1, RoundingMode.HALF_UP);
                 if (savingRate.compareTo(BigDecimal.ZERO) < 0) {
                     savingRate = BigDecimal.ZERO;
                 }
-
-                // 9. 碳减排量
+                // 碳减排量
                 BigDecimal savedKwh = baselineKwh.subtract(estimatedKwh);
                 BigDecimal carbonReduction = savedKwh.multiply(CARBON_FACTOR)
                         .setScale(4, RoundingMode.HALF_UP);
 
-                // 10. Upsert：先查后写（防重复）
-                EnergyRecord existing = energyRecordMapper.selectOne(
-                        Wrappers.<EnergyRecord>lambdaQuery()
-                                .eq(EnergyRecord::getDeviceId, device.getDeviceId())
-                                .eq(EnergyRecord::getRecordDate, today));
-
+                EnergyRecord existing = existingMap.get(deviceId);
                 if (existing != null) {
                     existing.setOnDurationMin(onDurationMin);
                     existing.setAvgBrightness(BigDecimal.valueOf(avgBrightness)
@@ -123,7 +120,7 @@ public class EnergyCalcTask {
                     energyRecordMapper.updateById(existing);
                 } else {
                     EnergyRecord record = new EnergyRecord();
-                    record.setDeviceId(device.getDeviceId());
+                    record.setDeviceId(deviceId);
                     record.setRecordDate(today);
                     record.setOnDurationMin(onDurationMin);
                     record.setAvgBrightness(BigDecimal.valueOf(avgBrightness)
@@ -136,7 +133,7 @@ public class EnergyCalcTask {
 
                 successCount++;
                 log.debug("[{}] brightness={}%, on={}min, kWh={}, save={}%",
-                        device.getDeviceId(), String.format("%.1f", avgBrightness),
+                        deviceId, String.format("%.1f", avgBrightness),
                         onDurationMin, estimatedKwh, savingRate);
             } catch (Exception e) {
                 log.error("能耗计算失败 [{}]: {}", device.getDeviceId(), e.getMessage());
