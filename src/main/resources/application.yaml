@@ -38,7 +38,7 @@ manual:
   lock-duration-minutes: 30          # 手动控制后 AI 锁定时长（分钟）
 
 mqtt:
-  broker: tcp://47.96.27.141:1883
+  broker: ssl://47.96.27.141:8883
   username: backend
   password: 123456
   client-id: smart-lighting-backend-v888
@@ -53,6 +53,9 @@ maxkb:
   chat-completions-url: ${MAXKB_CHAT_COMPLETIONS_URL:}
   api-key: ${MAXKB_API_KEY:}
   model: ${MAXKB_MODEL:gpt-3.5-turbo}
+
+device:
+  aes-key: ${DEVICE_AES_KEY}
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

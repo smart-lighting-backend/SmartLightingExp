@@ -40,6 +40,8 @@ public class JwtInterceptor implements HandlerInterceptor {
     private static final List<String> WHITE_LIST = List.of(
             "/api/auth/login",
             "/api/auth/register",
+            "/api/mqtt/auth",
+            "/api/mqtt/acl",
             "/doc.html",
             "/v3/api-docs",
             "/swagger-resources",

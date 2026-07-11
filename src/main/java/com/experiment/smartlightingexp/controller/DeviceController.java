@@ -52,6 +52,7 @@ public class DeviceController {
     private final AuditLogMapper auditLogMapper;
     private final DeviceAreaMapper deviceAreaMapper;
     private final MqttPublisher mqttPublisher;
+    private final DeviceCredentialService deviceCredentialService;
     @Autowired(required = false)
     private MockDataGenerator mockDataGenerator;
 
@@ -213,6 +214,12 @@ public class DeviceController {
         device.setDeleted(false);
         deviceService.save(device);
 
+        // 若传入出厂编号，自动生成 MQTT 鉴权凭证
+        String factorySerial = device.getFactorySerial();
+        if (factorySerial != null && !factorySerial.isBlank()) {
+            deviceCredentialService.createCredential(device.getDeviceId(), factorySerial.trim());
+        }
+
         saveAuditLog("DEVICE_CREATE", "DEVICE", device.getDeviceId(),
                 "新增设备-" + device.getName(), "SUCCESS", httpRequest);
         log.info("[设备] 新增: deviceId={}, name={}", device.getDeviceId(), device.getName());
@@ -336,6 +343,10 @@ public class DeviceController {
             for (Device d : toSave) {
                 saveAuditLog("DEVICE_CREATE", "DEVICE", d.getDeviceId(),
                         "批量新增-" + d.getName(), "SUCCESS", httpRequest);
+                String fs = d.getFactorySerial();
+                if (fs != null && !fs.isBlank()) {
+                    deviceCredentialService.createCredential(d.getDeviceId(), fs.trim());
+                }
             }
         }
 
@@ -407,6 +418,10 @@ public class DeviceController {
             String power = getCell(row, colMap, "ratedPower");
             if (power != null && !power.isBlank()) {
                 try { d.setRatedPower(new BigDecimal(power.trim())); } catch (Exception ignored) {}
+            }
+            String factorySerial = getCell(row, colMap, "factorySerial");
+            if (factorySerial != null && !factorySerial.isBlank()) {
+                d.setFactorySerial(factorySerial.trim());
             }
             devices.add(d);
         }
@@ -509,6 +524,10 @@ public class DeviceController {
             for (Device d : toSave) {
                 saveAuditLog("DEVICE_CREATE", "DEVICE", d.getDeviceId(),
                         "文件导入-" + d.getName(), "SUCCESS", httpRequest);
+                String fs = d.getFactorySerial();
+                if (fs != null && !fs.isBlank()) {
+                    deviceCredentialService.createCredential(d.getDeviceId(), fs.trim());
+                }
             }
         }
 
@@ -530,6 +549,7 @@ public class DeviceController {
         {"longitude", "经度", "longitude", "lng"},
         {"latitude", "纬度", "latitude", "lat"},
         {"ratedPower", "额定功率(W)", "额定功率", "功率", "ratedPower", "rated_power", "power"},
+        {"factorySerial", "出厂编号", "出厂编码", "序列号", "factorySerial", "factory_serial", "serial"},
     };
 
     private Map<String, Integer> buildColumnMap(String[] headerRow) {
@@ -841,10 +861,74 @@ public class DeviceController {
             return Result.error(500, "设备删除失败");
         }
 
+        // 同步删除设备凭证
+        deviceCredentialService.deleteByDeviceId(deviceId);
+
         saveAuditLog("DEVICE_DELETE", "DEVICE", deviceId,
                 "删除设备-" + existing.getName(), "SUCCESS", httpRequest);
         log.info("[设备] 删除: deviceId={}, name={}", deviceId, existing.getName());
         return Result.success();
+    }
+
+    // ======================== 设备凭证 ========================
+
+    /**
+     * 查询设备 MQTT 凭证信息（用于设备烧录配置）。
+     * 返回: broker 地址、端口、用户名、密码等完整连接信息。
+     */
+    @RequirePermission("device:read")
+    @GetMapping("/{deviceId}/credentials")
+    public Result<Map<String, String>> getCredentials(@PathVariable String deviceId) {
+        Device device = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId)
+                .eq(Device::getDeleted, false)
+                .one();
+        if (device == null) {
+            return Result.error("设备不存在");
+        }
+
+        Map<String, String> info = deviceCredentialService.getConnectionInfo(deviceId);
+        if (info == null) {
+            return Result.error("设备未配置 MQTT 凭证，请先编辑设备并填写出厂编号");
+        }
+
+        log.info("[设备凭证] 查询: deviceId={}", deviceId);
+        return Result.success(info);
+    }
+
+    /**
+     * 修改设备识别码（自动更新密码并同步到 EMQX）。
+     * 出厂编号不可修改，识别码默认 123456。
+     */
+    @RequirePermission("device:credential")
+    @PutMapping("/{deviceId}/id-code")
+    public Result<Map<String, String>> updateIdCode(@PathVariable String deviceId,
+                                                     @RequestBody Map<String, String> body) {
+        Device device = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId)
+                .eq(Device::getDeleted, false)
+                .one();
+        if (device == null) {
+            return Result.error("设备不存在");
+        }
+
+        String newIdCode = body.get("idCode");
+        if (newIdCode == null || newIdCode.isBlank()) {
+            return Result.error(400, "识别码不能为空");
+        }
+
+        try {
+            String newPassword = deviceCredentialService.updateIdCode(deviceId, newIdCode);
+            Map<String, String> result = new LinkedHashMap<>();
+            result.put("deviceId", deviceId);
+            result.put("idCode", newIdCode);
+            result.put("newPassword", newPassword);
+            result.put("message", "密码已更新并同步到 EMQX");
+            log.info("[设备凭证] 识别码更新: deviceId={}", deviceId);
+            return Result.success(result);
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
+        }
     }
 
     // ======================== 地图轻量接口 ========================

@@ -19,18 +19,16 @@ import java.util.concurrent.atomic.AtomicReference;
 public class MqttPublisher {
 
     private final MqttClient mqttClient;
-    private final ExecutorService publishExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService publishExecutor = Executors.newCachedThreadPool();
 
     public MqttPublisher(MqttClient mqttClient) {
         this.mqttClient = mqttClient;
     }
 
     public void publish(String topic, String payload, int qos) {
-        // 发布前检查连接状态
         if (!mqttClient.isConnected()) {
-            String err = String.format("MQTT client not connected, cannot publish to %s", topic);
-            log.error(err);
-            throw new RuntimeException(err);
+            log.warn("MQTT 未连接，跳过发布 topic={}", topic);
+            return;
         }
 
         AtomicReference<MqttException> publishError = new AtomicReference<>();
@@ -41,24 +39,18 @@ public class MqttPublisher {
                 message.setRetained(false);
                 mqttClient.publish(topic, message);
             } catch (MqttException e) {
-                log.error("MQTT publish failed to topic {}: {}", topic, e.getMessage());
                 publishError.set(e);
             }
         });
         try {
-            future.get(10, TimeUnit.SECONDS);
+            future.get(5, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            log.warn("MQTT publish timeout (10s), topic={}", topic);
-            future.cancel(true);
-            throw new RuntimeException("MQTT publish timeout: " + topic);
+            log.warn("MQTT 发布超时 topic={}, 后台继续尝试", topic);
         } catch (Exception e) {
-            log.error("MQTT publish interrupted, topic={}: {}", topic, e.getMessage());
-            future.cancel(true);
-            throw new RuntimeException("MQTT publish interrupted: " + topic, e);
+            log.warn("MQTT 发布异常 topic={}: {}", topic, e.getMessage());
         }
-
         if (publishError.get() != null) {
-            throw new RuntimeException("MQTT publish failed: " + publishError.get().getMessage(), publishError.get());
+            log.warn("MQTT 发布失败 topic={}: {}", topic, publishError.get().getMessage());
         }
     }
 
