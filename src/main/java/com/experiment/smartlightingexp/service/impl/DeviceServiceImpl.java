@@ -12,6 +12,7 @@ import com.experiment.smartlightingexp.entity.Device;
 import com.experiment.smartlightingexp.entity.DeviceArea;
 import com.experiment.smartlightingexp.mapper.DeviceAreaMapper;
 import com.experiment.smartlightingexp.mapper.DeviceMapper;
+import com.experiment.smartlightingexp.service.DeviceCredentialService;
 import com.experiment.smartlightingexp.service.DeviceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ import java.util.List;
 public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> implements DeviceService {
 
     private final DeviceAreaMapper deviceAreaMapper;
+    private final DeviceCredentialService deviceCredentialService;
 
     private static final long MAX_PAGE_SIZE = 100L;
     private static final int DEVICE_STATUS_DISABLED = 0;
@@ -226,12 +228,25 @@ public class DeviceServiceImpl extends ServiceImpl<DeviceMapper, Device> impleme
             return 0;
         }
 
+        // 删除前取出 deviceId，用于后续清理凭证
+        List<String> deletedDeviceIds = list(new LambdaQueryWrapper<Device>()
+                .select(Device::getDeviceId)
+                .in(Device::getId, activeIds))
+                .stream()
+                .map(Device::getDeviceId)
+                .toList();
+
         update(new LambdaUpdateWrapper<Device>()
                 .in(Device::getId, activeIds)
                 .eq(Device::getDeleted, false)
                 .set(Device::getEnabled, false)
                 .set(Device::getStatus, DEVICE_STATUS_DISABLED));
         removeBatchByIds(activeIds);
+
+        // 同步清理 MQTT 凭证（与单设备删除行为一致）
+        for (String did : deletedDeviceIds) {
+            deviceCredentialService.deleteByDeviceId(did);
+        }
         return activeIds.size();
     }
 

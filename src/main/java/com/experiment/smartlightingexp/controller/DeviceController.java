@@ -49,6 +49,7 @@ import java.util.stream.Collectors;
 public class DeviceController {
 
     private final DeviceService deviceService;
+    private final DeviceMapper deviceMapper;
     private final AuditLogMapper auditLogMapper;
     private final DeviceAreaMapper deviceAreaMapper;
     private final MqttPublisher mqttPublisher;
@@ -191,11 +192,8 @@ public class DeviceController {
             return Result.error(400, "设备编号只能包含字母、数字和下划线，且不能以下划线开头");
         }
 
-        // 检查 deviceId 唯一性（包含已删除的数据，因为唯一索引仍占用）
-        Device exist = deviceService.lambdaQuery()
-                .eq(Device::getDeviceId, device.getDeviceId())
-                .one();
-        if (exist != null) {
+        // 检查 deviceId 唯一性（查全表含已软删除，因为 uk_device_id 唯一约束不认逻辑删除）
+        if (deviceMapper.selectAllDeviceIdsIncludingDeleted().contains(device.getDeviceId())) {
             return Result.error(409, "设备编号已存在");
         }
 
@@ -243,13 +241,8 @@ public class DeviceController {
         List<Map<String, Object>> failed = new ArrayList<>();
         List<Device> toSave = new ArrayList<>();
 
-        // 获取已有 deviceId 集合
-        Set<String> existingIds = new HashSet<>(deviceService.lambdaQuery()
-                .select(Device::getDeviceId)
-                .list()
-                .stream()
-                .map(Device::getDeviceId)
-                .toList());
+        // 查全表含已软删除（uk_device_id 唯一约束不认逻辑删除）
+        Set<String> existingIds = new HashSet<>(deviceMapper.selectAllDeviceIdsIncludingDeleted());
         Set<String> batchIds = new HashSet<>();
 
         // 获取已有设备坐标集合（用于坐标重合检测）
@@ -448,9 +441,7 @@ public class DeviceController {
         List<Map<String, Object>> failed = new ArrayList<>();
         List<Device> toSave = new ArrayList<>();
 
-        Set<String> existingIds = new HashSet<>(deviceService.lambdaQuery()
-                .select(Device::getDeviceId).list().stream()
-                .map(Device::getDeviceId).toList());
+        Set<String> existingIds = new HashSet<>(deviceMapper.selectAllDeviceIdsIncludingDeleted());
         Set<String> batchIds = new HashSet<>();
 
         // 获取已有设备坐标集合（用于坐标重合检测）
