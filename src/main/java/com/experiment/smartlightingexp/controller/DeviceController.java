@@ -217,6 +217,9 @@ public class DeviceController {
         // 若传入出厂编号，自动生成 MQTT 鉴权凭证
         String factorySerial = device.getFactorySerial();
         if (factorySerial != null && !factorySerial.isBlank()) {
+            if (factorySerial.trim().length() > 30) {
+                return Result.error(400, "出厂编号不能超过30个字符");
+            }
             deviceCredentialService.createCredential(device.getDeviceId(), factorySerial.trim());
         }
 
@@ -321,6 +324,17 @@ public class DeviceController {
                     continue;
                 }
                 batchLocations.add(loc);
+            }
+
+            // 出厂编号长度校验
+            String fs = d.getFactorySerial();
+            if (fs != null && fs.trim().length() > 30) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", row);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "出厂编号不能超过30个字符");
+                failed.add(err);
+                continue;
             }
 
             // 设置默认值
@@ -505,6 +519,17 @@ public class DeviceController {
                     continue;
                 }
                 batchLocations.add(loc);
+            }
+
+            // 出厂编号长度校验
+            String fs = d.getFactorySerial();
+            if (fs != null && fs.trim().length() > 30) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("row", rowNum);
+                err.put("deviceId", d.getDeviceId());
+                err.put("reason", "出厂编号不能超过30个字符");
+                failed.add(err);
+                continue;
             }
 
             if (d.getStatus() == null) d.setStatus(1);
