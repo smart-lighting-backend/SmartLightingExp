@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class MqttPublisher {
 
     private final MqttClient mqttClient;
-    private final ExecutorService publishExecutor = Executors.newCachedThreadPool();
+    private final ExecutorService publishExecutor = Executors.newFixedThreadPool(8);
 
     public MqttPublisher(MqttClient mqttClient) {
         this.mqttClient = mqttClient;
