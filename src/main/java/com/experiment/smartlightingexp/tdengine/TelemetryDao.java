@@ -7,6 +7,9 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,10 +19,22 @@ public class TelemetryDao {
 
     private final TdengineTemplate tpl;
 
+    /* TDengine 存储 UTC, 前端传入/显示均为北京时间(+8) */
+    private static final ZoneId ZONE_BEIJING = ZoneId.of("Asia/Shanghai");
+    private static final ZoneId ZONE_UTC     = ZoneId.of("UTC");
+    private static final DateTimeFormatter UTC_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZONE_UTC);
+
     private static final RowMapper<Telemetry> ROW_MAPPER = (rs, rowNum) -> {
         Telemetry t = new Telemetry();
         Timestamp ts = rs.getTimestamp("ts");
-        if (ts != null) t.setCollectedAt(ts.toLocalDateTime());
+        /* TDengine 的 ts 是 UTC, 转为北京时间显示 */
+        if (ts != null) {
+            t.setCollectedAt(ts.toLocalDateTime()
+                .atZone(ZONE_UTC)
+                .withZoneSameInstant(ZONE_BEIJING)
+                .toLocalDateTime());
+        }
         t.setDeviceId(rs.getString("device_id"));
         t.setIlluminance(rs.getBigDecimal("illuminance"));
         t.setTemperature(rs.getBigDecimal("temperature"));
@@ -52,7 +67,10 @@ public class TelemetryDao {
     public List<Telemetry> query24h(String deviceId) {
         String sql = "SELECT ts, device_id, illuminance, temperature, humidity, pm25, aqi, pir, traffic_flow FROM telemetry"
                 + " WHERE device_id = ? AND ts >= ? ORDER BY ts ASC";
-        return tpl.query(sql, ROW_MAPPER, deviceId, Timestamp.valueOf(LocalDateTime.now().minusHours(24)));
+        /* 24 小时前, 北京时间 → UTC 字符串 */
+        String utc24h = ZonedDateTime.now(ZONE_BEIJING).minusHours(24)
+                .withZoneSameInstant(ZONE_UTC).format(UTC_FMT);
+        return tpl.query(sql, ROW_MAPPER, deviceId, utc24h);
     }
 
     public Telemetry latest(String deviceId) {
@@ -61,7 +79,13 @@ public class TelemetryDao {
         return tpl.queryForObject(sql, ROW_MAPPER, deviceId);
     }
 
-    private void appendWhere(StringBuilder sql, List<Object> params, String deviceId, LocalDateTime start, LocalDateTime end) {
+    /**
+     * 将北京时间转为 UTC 字符串后查询 TDengine。
+     * 直接传字符串, 绕过 Timestamp.toString() 的 JVM 时区转换问题,
+     * 确保 TDengine 字符串比较结果正确。
+     */
+    private void appendWhere(StringBuilder sql, List<Object> params,
+                             String deviceId, LocalDateTime start, LocalDateTime end) {
         List<String> conds = new ArrayList<>();
         if (deviceId != null && !deviceId.isBlank()) {
             conds.add("device_id = ?");
@@ -69,11 +93,11 @@ public class TelemetryDao {
         }
         if (start != null) {
             conds.add("ts >= ?");
-            params.add(Timestamp.valueOf(start));
+            params.add(start.atZone(ZONE_BEIJING).withZoneSameInstant(ZONE_UTC).format(UTC_FMT));
         }
         if (end != null) {
             conds.add("ts <= ?");
-            params.add(Timestamp.valueOf(end));
+            params.add(end.atZone(ZONE_BEIJING).withZoneSameInstant(ZONE_UTC).format(UTC_FMT));
         }
         if (!conds.isEmpty()) {
             sql.append(" WHERE ").append(String.join(" AND ", conds));

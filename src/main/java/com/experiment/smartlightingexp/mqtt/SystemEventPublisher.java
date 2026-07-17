@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -29,7 +30,7 @@ public class SystemEventPublisher {
         event.put("type", alarm.getType());
         event.put("level", alarm.getLevel());
         event.put("status", alarm.getStatus());
-        event.put("timestamp", LocalDateTime.now().toString());
+        event.put("timestamp", LocalDateTime.now(ZoneOffset.UTC).toString()); /* UTC 时间 */
         try {
             mqttPublisher.publish("system/alarms", objectMapper.writeValueAsString(event), 0);
         } catch (Exception e) {

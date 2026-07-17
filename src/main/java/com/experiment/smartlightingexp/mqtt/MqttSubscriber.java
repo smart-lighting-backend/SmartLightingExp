@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -45,7 +46,7 @@ public class MqttSubscriber {
     private final SystemEventPublisher systemEventPublisher;
     private final DecisionEngine decisionEngine;
     private final AlarmRecordService alarmRecordService;
-    private final ExecutorService executor = Executors.newFixedThreadPool(4);
+    private final ExecutorService executor = Executors.newFixedThreadPool(16);
 
     /** 遥测异常连续计数：deviceId → FaultCounter */
     private final ConcurrentHashMap<String, FaultCounter> faultCounters = new ConcurrentHashMap<>();
@@ -92,7 +93,7 @@ public class MqttSubscriber {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> hb = objectMapper.readValue(json, Map.class);
                         String hbDeviceId = hb.get("deviceId") != null ? hb.get("deviceId").toString() : deviceId;
-                        LocalDateTime hbNow = LocalDateTime.now();
+                        LocalDateTime hbNow = LocalDateTime.now(ZoneOffset.UTC); /* UTC 时间 */
                         deviceMapper.update(null,
                                 Wrappers.<Device>lambdaUpdate()
                                         .eq(Device::getDeviceId, hbDeviceId)
@@ -112,7 +113,7 @@ public class MqttSubscriber {
                             if (cmd != null && cmd.getAckAt() == null) {
                                 String ackStatus = ack.get("status") != null ? ack.get("status").toString() : "ACKED";
                                 cmd.setStatus(ackStatus);
-                                cmd.setAckAt(LocalDateTime.now());
+                                cmd.setAckAt(LocalDateTime.now(ZoneOffset.UTC)); /* UTC 时间 */
                                 controlCommandMapper.updateById(cmd);
                             }
                         }
@@ -126,7 +127,7 @@ public class MqttSubscriber {
                         try {
                             Telemetry telemetry = objectMapper.readValue(telemetryJson, Telemetry.class);
                             log.info("遥测处理 [{}]: lux={}, temp={}°C", telemetryDeviceId, telemetry.getIlluminance(), telemetry.getTemperature());
-                            LocalDateTime now = LocalDateTime.now();
+                            LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC); /* UTC 时间 */
 
                             // ─── 传感器异常检测 → FAULT 告警 ───
                             detectFault(telemetryDeviceId, telemetry, now);

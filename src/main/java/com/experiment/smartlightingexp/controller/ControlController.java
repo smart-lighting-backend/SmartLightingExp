@@ -54,7 +54,7 @@ public class ControlController {
     @Value("${manual.lock-duration-minutes:30}")
     private int manualLockDurationMinutes;
 
-    private static final List<String> VALID_ACTIONS = List.of("ON", "OFF", "DIMMING");
+    private static final List<String> VALID_ACTIONS = List.of("ON", "OFF", "DIMMING", "RESTART");
 
     /**
      * 手动控制设备（开/关/调光）。
@@ -195,6 +195,18 @@ public class ControlController {
                         .eq(Device::getDeviceId, deviceId)
                         .set(Device::getManualMode, false)
                         .set(Device::getManualExpireAt, null));
+        /* 下发 AUTO 命令到设备, 恢复硬件边缘决策 */
+        try {
+            Map<String, Object> autoCmd = new HashMap<>();
+            autoCmd.put("action", "AUTO");
+            autoCmd.put("source", "MANUAL");
+            autoCmd.put("operator", SecurityContext.getCurrentUsername());
+            mqttPublisher.publish(
+                    mqttProperties.getTopicPrefix() + "/" + deviceId + "/command",
+                    objectMapper.writeValueAsString(autoCmd), 1);
+        } catch (Exception e) {
+            log.warn("[{}] 下发 AUTO 命令失败: {}", deviceId, e.getMessage());
+        }
         saveAuditLog("UNLOCK", "DEVICE", deviceId, "解除手动锁定-恢复自动控制", "SUCCESS", httpRequest);
         log.info("[{}] Manual lock released, AI control resumed", deviceId);
         return Result.success();

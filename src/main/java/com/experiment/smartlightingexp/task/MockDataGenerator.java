@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,12 +81,13 @@ public class MockDataGenerator {
         List<Device> devices = deviceMapper.selectList(
                 new LambdaQueryWrapper<Device>()
                         .eq(Device::getEnabled, true)
-                        .eq(Device::getDeleted, false));
+                        .eq(Device::getDeleted, false)
+                        .ne(Device::getSource, "REAL"));
         if (devices.isEmpty()) {
-            log.warn("[MockGen] 未找到已启用设备，跳过");
+            log.warn("[MockGen] 未找到已启用模拟设备，跳过");
             return;
         }
-        log.info("[MockGen] 查到 {} 台设备，开始逐设备发布", devices.size());
+        log.info("[MockGen] 查到 {} 台模拟设备，开始逐设备发布", devices.size());
 
         int successCount = 0;
         int skipCount = 0;
@@ -147,7 +149,8 @@ public class MockDataGenerator {
         List<Device> devices = deviceMapper.selectList(
                 new LambdaQueryWrapper<Device>()
                         .eq(Device::getEnabled, true)
-                        .eq(Device::getDeleted, false));
+                        .eq(Device::getDeleted, false)
+                        .ne(Device::getSource, "REAL"));
         if (devices.isEmpty()) return;
 
         LocalDateTime now = LocalDateTime.now();
@@ -173,7 +176,7 @@ public class MockDataGenerator {
 
                 Map<String, Object> hb = new HashMap<>();
                 hb.put("deviceId", device.getDeviceId());
-                hb.put("timestamp", now.toString());
+                hb.put("timestamp", LocalDateTime.now(ZoneOffset.UTC).toString()); /* UTC 时间 */
                 MqttMessage msg = new MqttMessage(objectMapper.writeValueAsBytes(hb));
                 msg.setQos(0);
                 client.publish(mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/heartbeat", msg);
@@ -214,7 +217,7 @@ public class MockDataGenerator {
                     Map<String, Object> ack = new HashMap<>();
                     ack.put("commandId", cmd.getId());
                     ack.put("status", "EXECUTED");
-                    ack.put("completedAt", LocalDateTime.now().toString());
+                    ack.put("completedAt", LocalDateTime.now(ZoneOffset.UTC).toString()); /* UTC 时间 */
                     MqttMessage msg = new MqttMessage(objectMapper.writeValueAsBytes(ack));
                     msg.setQos(0);
                     client.publish(mqttProperties.getTopicPrefix() + "/" + device.getDeviceId() + "/command/ack", msg);
@@ -288,14 +291,14 @@ public class MockDataGenerator {
     private void publishTelemetry(MqttClient client, Device device) throws Exception {
         Map<String, Object> data = new HashMap<>();
         data.put("deviceId", device.getDeviceId());
-        data.put("illuminance", BigDecimal.valueOf(random.nextInt(2000)));
-        data.put("temperature", BigDecimal.valueOf(15 + (40 - 15) * random.nextDouble()).setScale(2, RoundingMode.HALF_UP));
-        data.put("humidity", BigDecimal.valueOf(40 + random.nextInt(50)));
-        data.put("pm25", BigDecimal.valueOf(10 + random.nextInt(140)));
-        data.put("aqi", random.nextInt(200));
-        data.put("pir", random.nextInt(2));
-        data.put("trafficFlow", random.nextInt(50));
-        data.put("collectedAt", LocalDateTime.now().toString());
+        data.put("illuminance", BigDecimal.valueOf(random.nextInt(2000)));                              // 光照度(lux) 0~1999
+        data.put("temperature", BigDecimal.valueOf(15 + (40 - 15) * random.nextDouble()).setScale(2, RoundingMode.HALF_UP)); // 温度(°C) 15.00~40.00
+        data.put("humidity", BigDecimal.valueOf(40 + random.nextInt(50)));                              // 湿度(%) 40~89
+        data.put("pm25", BigDecimal.valueOf(10 + random.nextInt(140)));                                 // PM2.5(μg/m³) 10~149
+        data.put("aqi", random.nextInt(200));                                                           // 空气质量指数 0~199
+        data.put("pir", random.nextInt(2));                                                             // 人体红外 0=无人 1=有人
+        data.put("trafficFlow", random.nextInt(50));                                                    // 人/车流量 0~49
+        data.put("collectedAt", LocalDateTime.now(ZoneOffset.UTC).toString()); /* UTC 时间 */
 
         MqttMessage msg = new MqttMessage(objectMapper.writeValueAsBytes(data));
         msg.setQos(0);
@@ -305,10 +308,10 @@ public class MockDataGenerator {
     private void publishVision(MqttClient client, String deviceId, String eventType, double confidence) throws Exception {
         Map<String, Object> event = new HashMap<>();
         event.put("deviceId", deviceId);
-        event.put("eventType", eventType);
-        event.put("confidence", BigDecimal.valueOf(confidence).setScale(2, RoundingMode.HALF_UP));
-        event.put("snapshotRef", "mock/snapshot/" + deviceId + "_" + System.currentTimeMillis() + ".jpg");
-        event.put("occurredAt", LocalDateTime.now().toString());
+        event.put("eventType", eventType);                                                                // 事件类型：行人检测/车辆通行/异常停车/危险场景
+        event.put("confidence", BigDecimal.valueOf(confidence).setScale(2, RoundingMode.HALF_UP));        // 置信度 0.60~0.99
+        event.put("snapshotRef", "mock/snapshot/" + deviceId + "_" + System.currentTimeMillis() + ".jpg"); // 抓拍图片引用
+        event.put("occurredAt", LocalDateTime.now(ZoneOffset.UTC).toString()); /* UTC 时间 */
 
         MqttMessage msg = new MqttMessage(objectMapper.writeValueAsBytes(event));
         msg.setQos(0);
@@ -335,7 +338,7 @@ public class MockDataGenerator {
         event.put("type", type);
         event.put("content", content);
         event.put("source", "自动");
-        event.put("occurredAt", LocalDateTime.now().toString());
+        event.put("occurredAt", LocalDateTime.now(ZoneOffset.UTC).toString()); /* UTC 时间 */
 
         MqttMessage msg = new MqttMessage(objectMapper.writeValueAsBytes(event));
         msg.setQos(0);

@@ -54,6 +54,9 @@ public class Device {
 
     private Boolean deleted;
 
+    /** 设备来源: SIMULATED=模拟设备, REAL=真实硬件 */
+    private String source;
+
     /** 出厂编号（前端传入，不存 device 表，用于生成 device_credential 凭证） */
     @TableField(exist = false)
     private String factorySerial;

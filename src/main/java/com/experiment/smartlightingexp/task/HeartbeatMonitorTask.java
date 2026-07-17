@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -62,7 +63,7 @@ public class HeartbeatMonitorTask {
                 continue;
             }
 
-            long elapsedSeconds = Duration.between(device.getLastHeartbeatAt(), LocalDateTime.now()).getSeconds();
+            long elapsedSeconds = Duration.between(device.getLastHeartbeatAt(), LocalDateTime.now(ZoneOffset.UTC)).getSeconds(); /* UTC 时间 */
             if (elapsedSeconds < offlineThresholdSeconds) {
                 continue;
             }
@@ -89,7 +90,7 @@ public class HeartbeatMonitorTask {
                 alarm.setStatus("ACTIVE");
                 alarm.setReason("心跳中断超过 " + offlineThresholdSeconds
                         + " 秒，最后心跳时间：" + device.getLastHeartbeatAt());
-                alarm.setStartAt(LocalDateTime.now());
+                alarm.setStartAt(LocalDateTime.now(ZoneOffset.UTC)); /* UTC 时间 */
                 alarmRecordMapper.insert(alarm);
                 systemEventPublisher.publishAlarmEvent("created", alarm);
                 alarmCount++;
