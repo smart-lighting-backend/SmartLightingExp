@@ -132,23 +132,44 @@ public class MqttSubscriber {
                             // ─── 传感器异常检测 → FAULT 告警 ───
                             detectFault(telemetryDeviceId, telemetry, now);
 
+                            // ─── 检查设备端手动模式（硬件按键触发 led_source=MANUAL）───
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> rawMap = objectMapper.readValue(telemetryJson, Map.class);
+                            Object ledSourceObj = rawMap.get("led_source");
+                            boolean deviceSideManual = "MANUAL".equals(
+                                    ledSourceObj != null ? ledSourceObj.toString() : null);
+
                             Device device = deviceMapper.selectOne(
                                     Wrappers.<Device>lambdaQuery().eq(Device::getDeviceId, telemetryDeviceId));
-                            boolean inManual = device != null
+                            boolean inManual = deviceSideManual
+                                    || (device != null
                                     && Boolean.TRUE.equals(device.getManualMode())
                                     && device.getManualExpireAt() != null
-                                    && device.getManualExpireAt().isAfter(now);
+                                    && device.getManualExpireAt().isAfter(now));
 
-                            // 合并遥测数据到 latestData，保留控制元数据（action/brightness/controlSource）
-                            String mergedLatestData = mergeLatestData(device, telemetryJson);
+                            if (deviceSideManual) {
+                                log.info("遥测处理 [{}]: 设备端手动模式 (led_source=MANUAL), 跳过策略引擎", telemetryDeviceId);
+                            }
+
+                            // 合并遥测数据: 设备端手动操作时以遥测真实值为准, 不保留旧控制元数据
+                            String mergedLatestData = mergeLatestData(device, telemetryJson,
+                                    !deviceSideManual);
 
                             if (inManual) {
-                                deviceMapper.update(null,
+                                com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device> updateWrapper =
                                         Wrappers.<Device>lambdaUpdate()
                                                 .eq(Device::getDeviceId, telemetryDeviceId)
                                                 .set(Device::getLatestData, mergedLatestData)
                                                 .set(Device::getLastHeartbeatAt, now)
-                                                .set(Device::getStatus, 1));
+                                                .set(Device::getStatus, 1);
+                                // 设备端手动模式 → 同步写入 manualMode 字段, 前端才能显示
+                                // 注意: 使用本地时间, 与 ControlController 保持一致
+                                if (deviceSideManual) {
+                                    updateWrapper.set(Device::getManualMode, true)
+                                            .set(Device::getManualExpireAt,
+                                                    LocalDateTime.now().plusMinutes(30));
+                                }
+                                deviceMapper.update(null, updateWrapper);
                             } else {
                                 com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Device> updateWrapper =
                                         Wrappers.<Device>lambdaUpdate()
@@ -204,10 +225,12 @@ public class MqttSubscriber {
     private static final Set<String> CONTROL_META_KEYS = Set.of("action", "brightness", "controlSource", "controlIssuedAt");
 
     /**
-     * 将新遥测 JSON 合并到设备现有 latestData 中，保留控制元数据。
+     * 将新遥测 JSON 合并到设备现有 latestData 中。
+     * @param preserveControlMeta 是否保留旧控制元数据 (action/brightness/controlSource)。
+     *                            设备端手动操作时应为 false，以遥测真实值为准。
      */
     @SuppressWarnings("unchecked")
-    private String mergeLatestData(Device device, String telemetryJson) {
+    private String mergeLatestData(Device device, String telemetryJson, boolean preserveControlMeta) {
         Map<String, Object> merged = new java.util.LinkedHashMap<>();
         // 先放入遥测数据
         try {
@@ -216,8 +239,9 @@ public class MqttSubscriber {
         } catch (Exception e) {
             log.warn("解析遥测JSON失败，使用原始字符串: {}", e.getMessage());
         }
-        // 保留已有的控制元数据
-        if (device != null && device.getLatestData() != null && !device.getLatestData().isBlank()) {
+        // 仅在非设备端手动操作时保留旧控制元数据
+        if (preserveControlMeta && device != null && device.getLatestData() != null
+                && !device.getLatestData().isBlank()) {
             try {
                 Map<String, Object> existing = objectMapper.readValue(device.getLatestData(), Map.class);
                 for (String key : CONTROL_META_KEYS) {

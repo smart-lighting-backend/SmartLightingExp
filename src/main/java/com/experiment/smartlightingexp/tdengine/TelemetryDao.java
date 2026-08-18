@@ -28,12 +28,10 @@ public class TelemetryDao {
     private static final RowMapper<Telemetry> ROW_MAPPER = (rs, rowNum) -> {
         Telemetry t = new Telemetry();
         Timestamp ts = rs.getTimestamp("ts");
-        /* TDengine 的 ts 是 UTC, 转为北京时间显示 */
+        /* JDBC 驱动已正确解析 TDengine REST 返回的 UTC 时间戳,
+           toLocalDateTime() 自动转为 JVM 时区 (Asia/Shanghai = 北京时间) */
         if (ts != null) {
-            t.setCollectedAt(ts.toLocalDateTime()
-                .atZone(ZONE_UTC)
-                .withZoneSameInstant(ZONE_BEIJING)
-                .toLocalDateTime());
+            t.setCollectedAt(ts.toLocalDateTime());
         }
         t.setDeviceId(rs.getString("device_id"));
         t.setIlluminance(rs.getBigDecimal("illuminance"));

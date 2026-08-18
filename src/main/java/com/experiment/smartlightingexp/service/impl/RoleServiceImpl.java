@@ -8,7 +8,8 @@ import com.experiment.smartlightingexp.mapper.PermissionMapper;
 import com.experiment.smartlightingexp.mapper.RoleMapper;
 import com.experiment.smartlightingexp.mapper.RolePermissionMapper;
 import com.experiment.smartlightingexp.service.RoleService;
-import lombok.RequiredArgsConstructor;
+import com.github.benmanes.caffeine.cache.Cache;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,11 +20,19 @@ import java.util.stream.Collectors;
  * 角色 Service 实现 — 角色 CRUD 和权限分配。
  */
 @Service
-@RequiredArgsConstructor
 public class RoleServiceImpl extends ServiceImpl<RoleMapper, Role> implements RoleService {
 
     private final PermissionMapper permissionMapper;
     private final RolePermissionMapper rolePermissionMapper;
+    private final Cache<String, List<String>> permissionCache;
+
+    public RoleServiceImpl(PermissionMapper permissionMapper,
+                           RolePermissionMapper rolePermissionMapper,
+                           @Qualifier("permissionCache") Cache<String, List<String>> permissionCache) {
+        this.permissionMapper = permissionMapper;
+        this.rolePermissionMapper = rolePermissionMapper;
+        this.permissionCache = permissionCache;
+    }
 
     @Override
     public Role getByRoleCode(String roleCode) {
@@ -53,6 +62,12 @@ public class RoleServiceImpl extends ServiceImpl<RoleMapper, Role> implements Ro
                         return rp;
                     }).collect(Collectors.toList());
             list.forEach(rolePermissionMapper::insert);
+        }
+
+        // 权限变更后清除缓存，确保下一次请求即时生效
+        Role role = getById(roleId);
+        if (role != null) {
+            permissionCache.invalidate(role.getRoleCode());
         }
     }
 }

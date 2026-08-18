@@ -1,5 +1,6 @@
 package com.experiment.smartlightingexp.common;
 
+import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * 全局异常处理器 — 确保所有异常都返回统一的 Result 格式。
  * HTTP 状态码与业务 code 保持一致，避免前端解析混乱。
  */
+@Hidden
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -48,6 +50,15 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result<Void> handleConstraint(ConstraintViolationException e) {
         return Result.error(400, e.getMessage());
+    }
+
+    /**
+     * 静态资源缺失（如 favicon.ico），不记录错误日志。
+     */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<Void> handleNoResource(org.springframework.web.servlet.resource.NoResourceFoundException e) {
+        return Result.error(404, "资源不存在");
     }
 
     /**

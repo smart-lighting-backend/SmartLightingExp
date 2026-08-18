@@ -12,6 +12,7 @@ import com.experiment.smartlightingexp.mapper.*;
 import com.experiment.smartlightingexp.mqtt.MqttPublisher;
 import com.experiment.smartlightingexp.service.*;
 import com.experiment.smartlightingexp.task.MockDataGenerator;
+import com.github.benmanes.caffeine.cache.Cache;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.experiment.smartlightingexp.tdengine.TelemetryDao;
 import com.experiment.smartlightingexp.tdengine.VisionEventDao;
@@ -54,6 +55,8 @@ public class DeviceController {
     private final DeviceAreaMapper deviceAreaMapper;
     private final MqttPublisher mqttPublisher;
     private final DeviceCredentialService deviceCredentialService;
+    private final Cache<String, String> mapLocationsCache;
+    private final ObjectMapper objectMapper;
     @Autowired(required = false)
     private MockDataGenerator mockDataGenerator;
 
@@ -179,6 +182,62 @@ public class DeviceController {
     }
 
     /**
+     * 远程配置真实设备的 WiFi 连接参数。
+     * 通过 MQTT config Topic 下发，设备写入 Flash 后进入等待重启模式。
+     */
+    @RequirePermission("device:control")
+    @PutMapping("/{deviceId}/wifi-config")
+    public Result<?> updateDeviceWifi(@PathVariable String deviceId,
+                                       @RequestBody @Valid DeviceWifiConfigRequest request,
+                                       HttpServletRequest httpRequest) {
+        Device device = deviceService.lambdaQuery()
+                .eq(Device::getDeviceId, deviceId)
+                .eq(Device::getDeleted, false)
+                .one();
+        if (device == null) {
+            return Result.error("设备不存在");
+        }
+        if (!"REAL".equals(device.getSource())) {
+            return Result.error("仅支持真实硬件设备 (source=REAL)");
+        }
+
+        // 构造 JSON 并下发到 MQTT config Topic
+        String topic = "streetlight/" + deviceId + "/config";
+        String json;
+        try {
+            Map<String, String> cfg = new LinkedHashMap<>();
+            cfg.put("wifi_ssid", request.getWifiSsid());
+            cfg.put("wifi_password", request.getWifiPassword());
+            json = objectMapper.writeValueAsString(cfg);
+        } catch (JsonProcessingException e) {
+            log.error("[{}] JSON序列化失败: {}", deviceId, e.getMessage());
+            return Result.error("系统错误");
+        }
+
+        try {
+            mqttPublisher.publish(topic, json, 1);
+        } catch (Exception e) {
+            log.error("[{}] MQTT下发WiFi配置失败: {}", deviceId, e.getMessage());
+            return Result.error("MQTT 下发失败: " + e.getMessage());
+        }
+
+        // 写入审计日志（不记录密码）
+        AuditLog auditLog = new AuditLog();
+        auditLog.setOperator(SecurityContext.getCurrentUsername());
+        auditLog.setAction("WIFI_CONFIG");
+        auditLog.setTargetType("DEVICE");
+        auditLog.setTargetId(deviceId);
+        auditLog.setDetail("修改设备WiFi配置, SSID=" + request.getWifiSsid());
+        auditLog.setResult("SUCCESS");
+        auditLog.setIpAddress(httpRequest.getRemoteAddr());
+        auditLog.setOperatedAt(LocalDateTime.now());
+        auditLogMapper.insert(auditLog);
+
+        log.info("[{}] WiFi配置已下发 (SSID={}), 设备将进入等待重启模式", deviceId, request.getWifiSsid());
+        return Result.success("WiFi 配置已下发，请到设备现场按 RESET 键重启。10 分钟内未重启将自动恢复旧配置。");
+    }
+
+    /**
      * 新增设备。
      */
     @RequirePermission("device:create")
@@ -211,6 +270,7 @@ public class DeviceController {
         }
         device.setDeleted(false);
         deviceService.save(device);
+        invalidateMapCache(); // 设备变更，清除地图缓存
 
         // 若传入出厂编号，自动生成 MQTT 鉴权凭证
         String factorySerial = device.getFactorySerial();
@@ -347,6 +407,7 @@ public class DeviceController {
         // 批量写入
         if (!toSave.isEmpty()) {
             deviceService.saveBatch(toSave);
+            invalidateMapCache(); // 批量新增后清除地图缓存
             for (Device d : toSave) {
                 saveAuditLog("DEVICE_CREATE", "DEVICE", d.getDeviceId(),
                         "批量新增-" + d.getName(), "SUCCESS", httpRequest);
@@ -537,6 +598,7 @@ public class DeviceController {
 
         if (!toSave.isEmpty()) {
             deviceService.saveBatch(toSave);
+            invalidateMapCache(); // 文件导入后清除地图缓存
             for (Device d : toSave) {
                 saveAuditLog("DEVICE_CREATE", "DEVICE", d.getDeviceId(),
                         "文件导入-" + d.getName(), "SUCCESS", httpRequest);
@@ -713,6 +775,7 @@ public class DeviceController {
         }
         if (device.getEnabled() != null) existing.setEnabled(device.getEnabled());
         deviceService.updateById(existing);
+        invalidateMapCache(); // 设备信息变更（可能影响地图显示）
 
         // 重新查询返回最新数据
         Device updated = deviceService.lambdaQuery()
@@ -844,6 +907,8 @@ public class DeviceController {
             return Result.error(404, "未找到可删除设备");
         }
 
+        invalidateMapCache(); // 批量删除后清除地图缓存
+
         saveAuditLog("DEVICE_BATCH_DELETE", "DEVICE", ids.toString(),
                 "批量删除设备-" + success + "台", "SUCCESS", httpRequest);
         log.info("[设备] 批量删除: 请求数={}, 成功={}", ids.size(), success);
@@ -879,6 +944,7 @@ public class DeviceController {
 
         // 同步删除设备凭证
         deviceCredentialService.deleteByDeviceId(deviceId);
+        invalidateMapCache(); // 删除设备后清除地图缓存
 
         saveAuditLog("DEVICE_DELETE", "DEVICE", deviceId,
                 "删除设备-" + existing.getName(), "SUCCESS", httpRequest);
@@ -956,6 +1022,19 @@ public class DeviceController {
     @RequirePermission("device:read")
     @GetMapping("/map-locations")
     public Result<List<Map<String, Object>>> mapLocations() {
+        // 从缓存读取，未命中再查 DB
+        String cached = mapLocationsCache.getIfPresent("all");
+        if (cached != null) {
+            try {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> cachedResult = objectMapper.readValue(cached, List.class);
+                return Result.success(cachedResult);
+            } catch (JsonProcessingException e) {
+                log.warn("地图缓存反序列化失败，回退查DB: {}", e.getMessage());
+                mapLocationsCache.invalidate("all");
+            }
+        }
+
         List<Device> devices = deviceService.lambdaQuery()
                 .select(Device::getDeviceId, Device::getName, Device::getLocation,
                         Device::getStatus, Device::getArea, Device::getHealthScore)
@@ -974,7 +1053,20 @@ public class DeviceController {
             item.put("healthScore", d.getHealthScore());
             result.add(item);
         }
+
+        // 写入缓存
+        try {
+            mapLocationsCache.put("all", objectMapper.writeValueAsString(result));
+        } catch (JsonProcessingException e) {
+            log.warn("地图缓存序列化失败: {}", e.getMessage());
+        }
+
         return Result.success(result);
+    }
+
+    /** 设备变更时清除地图缓存 */
+    private void invalidateMapCache() {
+        mapLocationsCache.invalidate("all");
     }
 
     // ======================== 审计日志 ========================
@@ -1038,7 +1130,6 @@ public class DeviceController {
     private final VisionEventService visionEventService;
     private final VoiceEventService voiceEventService;
     private final AlarmRecordService alarmRecordService;
-    private final ObjectMapper objectMapper;
 
     @RequirePermission("device:read")
     @GetMapping("/{deviceId}/health")

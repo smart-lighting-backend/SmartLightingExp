@@ -6,10 +6,11 @@ import com.experiment.smartlightingexp.entity.User;
 import com.experiment.smartlightingexp.mapper.PermissionMapper;
 import com.experiment.smartlightingexp.service.UserService;
 import com.experiment.smartlightingexp.util.JwtUtil;
+import com.github.benmanes.caffeine.cache.Cache;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -26,13 +27,23 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class JwtInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final PermissionMapper permissionMapper;
     private final UserService userService;
+    private final Cache<String, List<String>> permissionCache;
     private static final String SUPER_ADMIN_ROLE = "SUPER_ADMIN";
+
+    public JwtInterceptor(JwtUtil jwtUtil,
+                          PermissionMapper permissionMapper,
+                          UserService userService,
+                          @Qualifier("permissionCache") Cache<String, List<String>> permissionCache) {
+        this.jwtUtil = jwtUtil;
+        this.permissionMapper = permissionMapper;
+        this.userService = userService;
+        this.permissionCache = permissionCache;
+    }
 
     /**
      * 白名单路径前缀 — 匹配开头即放行（所有 HTTP 方法）。
@@ -164,11 +175,16 @@ public class JwtInterceptor implements HandlerInterceptor {
         return PUBLIC_GET_PATHS.stream().anyMatch(path::startsWith);
     }
 
+    /**
+     * 获取角色有效权限 — 优先从本地缓存读取，未命中再查 DB。
+     * SUPER_ADMIN 也走缓存，权限表极少变动，60s 过期足够。
+     */
     private List<String> getEffectivePermissions(String roleCode) {
-        // SUPER_ADMIN 无需分配，自动拥有全部权限
-        if ("SUPER_ADMIN".equals(roleCode)) {
-            return permissionMapper.selectAllPermissionCodes();
-        }
-        return permissionMapper.selectPermissionCodesByRoleCode(roleCode);
+        return permissionCache.get(roleCode, key -> {
+            if (SUPER_ADMIN_ROLE.equals(key)) {
+                return permissionMapper.selectAllPermissionCodes();
+            }
+            return permissionMapper.selectPermissionCodesByRoleCode(key);
+        });
     }
 }
